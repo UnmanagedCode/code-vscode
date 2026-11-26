@@ -17,7 +17,7 @@
 
 ## Relay messages (`plugin/relayCore.mjs`)
 
-The relay accepts window messages only from `window.parent` with an origin whose scheme is `vscode-webview:`, and replies to that origin. On load it posts `{type: 'ready'}`.
+The relay accepts window messages only from `window.parent` with an origin whose scheme is `vscode-webview:`, and replies to that origin. On load it reads `GET api/health` once, then posts `{type: 'ready'}`. If that read fails no `ready` is posted, so the extension reports the relay as unreachable (`RELAY_TIMEOUT`).
 
 Request `{reqId, op, ...args}`; response `{type: 'result', reqId, ok: true, value?}` or `{type: 'result', reqId, ok: false, code, error}`.
 
@@ -29,7 +29,7 @@ Request `{reqId, op, ...args}`; response `{type: 'result', reqId, ok: true, valu
 | `setChip {sid, title, data}` | `PUT api/sessions/<sid>/chip` | none |
 | `clearChip {sid}` | `DELETE api/sessions/<sid>/chip` without `rev` | none |
 
-- View-only gate: chip ops answer `VIEW_ONLY` without writing when `uiMode === 'view'`, or `'interact'` and `focusSessionId !== sid` (cc's `sessionViewOnly`, `shared/viewOnly.ts`). Health is read once per relay load; a failed read is retried.
+- View-only gate: chip ops answer `VIEW_ONLY` without writing when `uiMode === 'view'`, or `'interact'` and `focusSessionId !== sid` (cc's `sessionViewOnly`, `shared/viewOnly.ts`). The mode read at load is the only health read, so every op makes exactly one cc call and its worst case (the relay's 10 s timeout) stays below the extension's 12 s request timeout.
 - Codes: cc's pass through (`SESSION_NOT_LIVE`, `INVALID_ARGUMENT`); the relay adds `VIEW_ONLY`, `REQUEST_FAILED` (network error or 10 s timeout) and `HOST_ERROR` (non-2xx with no `code`, or a conductor started without a session id).
 - Chip limits (title 200 characters, data 256 KiB) are cc's `CHIP_TITLE_MAX` / `CHIP_DATA_MAX` in `src/contextChip.ts`, duplicated in `extension/src/chipShape.js`.
 

@@ -72,3 +72,21 @@ test('a file document is identified by its file system path', () => {
   };
   assert.match(shapeEditor(editor).data, /^path: \/w\/a\.ts\n/);
 });
+
+test('data never exceeds the limit, even when the omitted count has eight digits', () => {
+  const text = 'a'.repeat(20_000_000);
+  const { data } = shapeChip(snap(pos(0, 0), pos(0, 5), { text }));
+  assert.ok(data.length <= CHIP_DATA_MAX, `length ${data.length}`);
+  const m = /\n… \(truncated, (\d+) chars omitted\)$/.exec(data);
+  assert.ok(m && m[1].length >= 8);
+  const kept = data.length - m[0].length - data.indexOf('\n\n') - 2;
+  assert.equal(kept + Number(m[1]), text.length);
+});
+
+test('a path near the data limit still yields data within it, keeping the head of the text, never its tail', () => {
+  const text = `HEAD${'x'.repeat(CHIP_DATA_MAX)}TAIL`;
+  const { data } = shapeChip(snap(pos(0, 0), pos(0, 5), { path: `/${'p'.repeat(CHIP_DATA_MAX - 10)}`, text }));
+  assert.ok(data.length <= CHIP_DATA_MAX, `length ${data.length}`);
+  assert.ok(data.includes('HEAD'));
+  assert.ok(!data.includes('TAIL'));
+});

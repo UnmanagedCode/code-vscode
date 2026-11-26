@@ -6,6 +6,8 @@ const CHIP_TITLE_MAX = 200;
 const CHIP_DATA_MAX = 256 * 1024;
 
 const ELLIPSIS = '…';
+// Keeps the fixed header far below CHIP_DATA_MAX, so the text always has room.
+const PATH_MAX = 4096;
 
 function basenameOf(fileName) {
   return String(fileName).split(/[\\/]/).filter(Boolean).pop() ?? String(fileName);
@@ -30,11 +32,12 @@ function titleOf(fileName, first, last) {
 }
 
 function dataOf({ path, languageId, text }, first, last) {
-  const head = `path: ${path}\nlines: ${first}-${last}\nlanguage: ${languageId}\n\n`;
+  const shownPath = path.length > PATH_MAX ? path.slice(0, PATH_MAX - 1) + ELLIPSIS : path;
+  const head = `path: ${shownPath}\nlines: ${first}-${last}\nlanguage: ${languageId}\n\n`;
   if (head.length + text.length <= CHIP_DATA_MAX) return head + text;
-  // Room for the marker line, whose number has at most 7 digits.
   const marker = (omitted) => `\n${ELLIPSIS} (truncated, ${omitted} chars omitted)`;
-  let keep = CHIP_DATA_MAX - head.length - marker(9_999_999).length;
+  // The omitted count is at most text.length, so this reserves at least the marker's real length.
+  let keep = CHIP_DATA_MAX - head.length - marker(text.length).length;
   const code = text.charCodeAt(keep - 1);
   if (code >= 0xd800 && code <= 0xdbff) keep -= 1; // never split a surrogate pair
   return head + text.slice(0, keep) + marker(text.length - keep);

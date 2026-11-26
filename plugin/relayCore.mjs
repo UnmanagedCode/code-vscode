@@ -2,6 +2,7 @@
 // The relay runs on cc's own origin and carries the VS Code extension's requests to cc's REST API.
 //
 // Request:  { reqId, op, ...args }   ops: listConductors | newConductor | health | setChip | clearChip
+// The relay reads cc's UI mode once, in start(), before announcing ready.
 // Response: { type: 'result', reqId, ok: true, value? } | { type: 'result', reqId, ok: false, code, error }
 
 export const CONDUCT_PROJECT = '.conduct';
@@ -47,17 +48,16 @@ export function createRelay({
     if (!r.ok) return r;
     return { ok: true, value: { uiMode: r.value?.uiMode ?? 'full', focusSessionId: r.value?.focus?.sessionId ?? null } };
   }
-  // Read once per relay load; a failed read is retried by the next call.
-  async function cachedHealth() {
+  // Read once per relay load and never again, so a gated op makes exactly one cc call
+  // and its worst case stays within the extension's request timeout.
+  function start() {
     healthRead ??= health();
-    const r = await healthRead;
-    if (!r.ok) healthRead = null;
-    return r;
+    return healthRead;
   }
 
   // Mirrors sessionViewOnly (shared/viewOnly.ts).
   async function viewOnlyGate(sid) {
-    const h = await cachedHealth();
+    const h = await start();
     if (!h.ok) return h;
     const { uiMode, focusSessionId } = h.value;
     if (uiMode === 'view' || (uiMode === 'interact' && focusSessionId !== sid)) {
@@ -112,5 +112,5 @@ export function createRelay({
     ev.source.postMessage({ type: 'result', reqId, ...result }, ev.origin);
   }
 
-  return { onMessage };
+  return { onMessage, start };
 }

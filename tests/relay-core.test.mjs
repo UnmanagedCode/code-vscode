@@ -32,7 +32,7 @@ function harness(routes, opts = {}) {
   };
   // Message events from PARENT answer through PARENT.postMessage.
   PARENT.postMessage = source.postMessage;
-  return { cc, replies, send, last: () => replies.at(-1)?.msg };
+  return { cc, relay, replies, send, last: () => replies.at(-1)?.msg };
 }
 
 const FULL = { 'GET /api/health': { json: { ok: true, uiMode: 'full' } } };
@@ -168,16 +168,23 @@ test('under --ui interact, only the focused session takes a chip', async () => {
   assert.equal(h.last().ok, true);
 });
 
-test('health is read once per relay load, and a failed read is retried', async () => {
-  let reads = 0;
-  const h = harness({
-    'GET /api/health': () => (++reads === 1 ? new TypeError('down') : { json: { uiMode: 'full' } }),
-    'PUT /api/sessions/s/chip': { json: { ok: true } },
-  });
+test('after start(), the first gated op makes exactly one cc call, and health is never read again', async () => {
+  const h = harness({ ...FULL, 'PUT /api/sessions/s/chip': { json: { ok: true } }, 'DELETE /api/sessions/s/chip': { json: { ok: true } } });
+  const started = await h.relay.start();
+  assert.equal(started.ok, true);
+  assert.equal(h.cc.calls.length, 1);
+  await h.send({ reqId: '1', op: 'setChip', sid: 's', title: 't', data: 'd' });
+  assert.deepEqual(h.cc.calls.slice(1).map((c) => c.method), ['PUT']);
+  await h.send({ reqId: '2', op: 'clearChip', sid: 's' });
+  assert.deepEqual(h.cc.calls.slice(1).map((c) => c.method), ['PUT', 'DELETE']);
+});
+
+test('start() reports a failed health read, and the gate then refuses chip writes without reaching cc', async () => {
+  const h = harness({ 'GET /api/health': () => new TypeError('down'), 'PUT /api/sessions/s/chip': { json: { ok: true } } });
+  const started = await h.relay.start();
+  assert.equal(started.ok, false);
+  assert.equal(started.code, 'REQUEST_FAILED');
   await h.send({ reqId: '1', op: 'setChip', sid: 's', title: 't', data: 'd' });
   assert.equal(h.last().code, 'REQUEST_FAILED');
-  await h.send({ reqId: '2', op: 'setChip', sid: 's', title: 't', data: 'd' });
-  await h.send({ reqId: '3', op: 'setChip', sid: 's', title: 't', data: 'd' });
-  assert.equal(h.last().ok, true);
-  assert.equal(reads, 2);
+  assert.equal(h.cc.calls.some((c) => c.method === 'PUT'), false);
 });
