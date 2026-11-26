@@ -6,8 +6,11 @@ const CHIP_TITLE_MAX = 200;
 const CHIP_DATA_MAX = 256 * 1024;
 
 const ELLIPSIS = '…';
-// Keeps the fixed header far below CHIP_DATA_MAX, so the text always has room.
+// Cap the header's variable fields so the whole header stays far below CHIP_DATA_MAX and the text always has room.
 const PATH_MAX = 4096;
+const LANGUAGE_MAX = 256;
+
+const capped = (value, max) => (value.length > max ? value.slice(0, max - 1) + ELLIPSIS : value);
 
 function basenameOf(fileName) {
   return String(fileName).split(/[\\/]/).filter(Boolean).pop() ?? String(fileName);
@@ -32,12 +35,11 @@ function titleOf(fileName, first, last) {
 }
 
 function dataOf({ path, languageId, text }, first, last) {
-  const shownPath = path.length > PATH_MAX ? path.slice(0, PATH_MAX - 1) + ELLIPSIS : path;
-  const head = `path: ${shownPath}\nlines: ${first}-${last}\nlanguage: ${languageId}\n\n`;
+  const head = `path: ${capped(path, PATH_MAX)}\nlines: ${first}-${last}\nlanguage: ${capped(languageId, LANGUAGE_MAX)}\n\n`;
   if (head.length + text.length <= CHIP_DATA_MAX) return head + text;
   const marker = (omitted) => `\n${ELLIPSIS} (truncated, ${omitted} chars omitted)`;
   // The omitted count is at most text.length, so this reserves at least the marker's real length.
-  let keep = CHIP_DATA_MAX - head.length - marker(text.length).length;
+  let keep = Math.max(0, CHIP_DATA_MAX - head.length - marker(text.length).length);
   const code = text.charCodeAt(keep - 1);
   if (code >= 0xd800 && code <= 0xdbff) keep -= 1; // never split a surrogate pair
   return head + text.slice(0, keep) + marker(text.length - keep);

@@ -90,3 +90,11 @@ test('a path near the data limit still yields data within it, keeping the head o
   assert.ok(data.includes('HEAD'));
   assert.ok(!data.includes('TAIL'));
 });
+
+test('a very long language id cannot push data past the limit, and the text keeps its head', () => {
+  const text = `HEAD${'x'.repeat(1_000_000)}TAIL`;
+  const { data } = shapeChip(snap(pos(0, 0), pos(0, 5), { languageId: 'l'.repeat(300_000), text }));
+  assert.ok(data.length <= CHIP_DATA_MAX, `length ${data.length}`);
+  assert.ok(data.includes('HEAD'));
+  assert.ok(!data.includes('TAIL'));
+});

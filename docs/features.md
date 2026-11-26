@@ -35,7 +35,7 @@ A notification appears once per state change, never once per write.
 
 - Source: the active editor's primary selection only.
 - Title: `<basename>:<line>` for one line, `<basename>:<start>-<end> (<n> lines)` otherwise; lines are 1-based; a selection ending at column 0 of a later line excludes that line; a long name is truncated with `…`.
-- Data: `path:` (file path, or the URI for non-file documents), `lines:`, `language:`, a blank line, then the selected text. Text past the chip data limit is cut with `… (truncated, <n> chars omitted)`, so the data never exceeds the limit; a path longer than 4096 characters is shortened with `…`.
+- Data: `path:` (file path, or the URI for non-file documents), `lines:`, `language:`, a blank line, then the selected text. Text past the chip data limit is cut with `… (truncated, <n> chars omitted)`, so the data never exceeds the limit; the header's `path` (over 4096 characters) and `language` (over 256) are shortened with `…`, which bounds the header, so the guarantee holds for any input.
 - Debounce: 250 ms trailing (`SELECTION_DEBOUNCE_MS`). An empty selection clears the chip.
 - Focus: the active editor becoming undefined (focus moved to the cc panel, a terminal, another webview) changes nothing.
 - ×: clearing the chip in cc's composer needs no handling here; the next selection change sets it again, even for the same text (no dedupe).

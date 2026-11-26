@@ -29,7 +29,7 @@ Request `{reqId, op, ...args}`; response `{type: 'result', reqId, ok: true, valu
 | `setChip {sid, title, data}` | `PUT api/sessions/<sid>/chip` | none |
 | `clearChip {sid}` | `DELETE api/sessions/<sid>/chip` without `rev` | none |
 
-- View-only gate: chip ops answer `VIEW_ONLY` without writing when `uiMode === 'view'`, or `'interact'` and `focusSessionId !== sid` (cc's `sessionViewOnly`, `shared/viewOnly.ts`). The mode read at load is the only health read, so every op makes exactly one cc call and its worst case (the relay's 10 s timeout) stays below the extension's 12 s request timeout.
+- View-only gate: chip ops answer `VIEW_ONLY` without writing when `uiMode === 'view'`, or `'interact'` and `focusSessionId !== sid` (cc's `sessionViewOnly`, `shared/viewOnly.ts`). The gate's only health read is the one at load, so a gated op makes at most one cc call (none when the gate refuses it) and its worst case, the relay's 10 s timeout, stays below the extension's 12 s request timeout. The `health` op itself does a fresh `GET api/health` each time.
 - Codes: cc's pass through (`SESSION_NOT_LIVE`, `INVALID_ARGUMENT`); the relay adds `VIEW_ONLY`, `REQUEST_FAILED` (network error or 10 s timeout) and `HOST_ERROR` (non-2xx with no `code`, or a conductor started without a session id).
 - Chip limits (title 200 characters, data 256 KiB) are cc's `CHIP_TITLE_MAX` / `CHIP_DATA_MAX` in `src/contextChip.ts`, duplicated in `extension/src/chipShape.js`.
 
