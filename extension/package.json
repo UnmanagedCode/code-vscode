@@ -1,0 +1,40 @@
+{
+  "name": "code-vscode",
+  "displayName": "Code Conductor",
+  "description": "Shows one cc conductor session in a VS Code panel and turns the editor selection into its context chip.",
+  "version": "0.1.0",
+  "publisher": "code-conductor",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Other"],
+  "main": "./src/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "panel": [{ "id": "codeConductor", "title": "cc", "icon": "media/icon.svg" }]
+    },
+    "views": {
+      "codeConductor": [{ "id": "codeConductor.session", "name": "cc", "type": "webview" }]
+    },
+    "commands": [
+      { "command": "codeConductor.connect", "title": "cc: Connect" },
+      { "command": "codeConductor.disconnect", "title": "cc: Disconnect" }
+    ],
+    "configuration": {
+      "title": "Code Conductor",
+      "properties": {
+        "codeConductor.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8787",
+          "markdownDescription": "The cc URL as seen from the machine the extension runs on (the remote host in a VS Code Remote window). The code-vscode plugin must be enabled in that cc."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package --allow-missing-repository --skip-license"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.0.0"
+  }
+}

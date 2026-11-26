@@ -1,0 +1,10 @@
+{
+  "name": "code-vscode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "cc plugin and VS Code extension that show one conductor session in a VS Code panel",
+  "scripts": {
+    "test": "node --test"
+  }
+}
