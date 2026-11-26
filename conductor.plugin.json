@@ -1,0 +1,10 @@
+{
+  "id": "code-vscode",
+  "name": "Code VS Code",
+  "version": "0.1.0",
+  "pluginApi": 1,
+  "backend": {
+    "start": "node plugin/server.mjs",
+    "healthPath": "/health"
+  }
+}
