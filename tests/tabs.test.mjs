@@ -9,14 +9,14 @@ const { SESSION_KEY, takeLegacySessionId } = require('../extension/src/migration
 const live = [{ sessionId: 's1', displayLabel: 'Refactor auth', status: 'idle' }, { sessionId: 's2', displayLabel: 'Fix build', status: 'busy' }];
 const chip = { kind: 'selection', title: 'a.ts:1', data: 'x' };
 
-function setup({ conductors = live, stored, current = null, relay } = {}) {
-  const fake = createFakeVscode({ conductors, relay });
+function setup({ conductors = live, stored, current = null, relay, serverUrl } = {}) {
+  const fake = createFakeVscode({ conductors, relay, serverUrl });
   const store = new Map(stored ? [[SESSION_KEY, stored]] : []);
   const workspaceState = { get: (k) => store.get(k), update: async (k, v) => { if (v === undefined) store.delete(k); else store.set(k, v); } };
   const source = { current, refresh: () => source.current };
   const tabs = createTabs({
     vscode: fake.vscode, extensionUri: 'ext', randomBytes: () => ({ toString: () => 'n' }),
-    getServerUrl: () => 'http://127.0.0.1:8787', source,
+    getServerUrl: () => fake.config.serverUrl, source,
     takeLegacySessionId: () => takeLegacySessionId(workspaceState),
   });
   const pickLabel = (label) => (items) => items.find((i) => i.label === label);
@@ -176,6 +176,8 @@ test('a hidden tab that becomes visible receives nothing until the next chip', a
   t.tabs.onChip(chip);
   await settle();
   const before = t.writes('s2').length;
+  // a real current chip, so a visibility-triggered push would write it
+  t.source.current = chip;
   t.fake.panels[1].setVisible(true);
   t.fake.panels[1].setActive(true);
   await settle();
@@ -277,4 +279,41 @@ test('a closed tab releases its session so it can be opened again', async () => 
   await t.tabs.open();
   assert.equal(t.fake.panels.length, 2);
   assert.equal(t.fake.panels[1].disposed, false);
+});
+
+test('a failing endpoints lookup (bad serverUrl) reports the error and disposes the transient host', async () => {
+  const t = setup({ serverUrl: 'not a url' });
+  await t.tabs.open();
+  assert.equal(t.fake.messages[0][0], 'error');
+  assert.equal(t.fake.panels.length, 1);
+  assert.equal(t.fake.panels[0].disposed, true);
+  assert.equal(t.fake.statusBars[0].text, 'cc: no tab open');
+  // the picker is free again
+  t.fake.config.serverUrl = 'http://127.0.0.1:8787';
+  t.fake.pickScript.push(undefined);
+  await t.tabs.open();
+  assert.equal(t.fake.quickPicks.length, 1);
+});
+
+test('a relay reload re-sends a repeat file chip despite the dedupe baseline', async () => {
+  const file = { kind: 'file', key: '/a.ts', title: 'a.ts', data: 'path: /a.ts' };
+  const t = setup({ current: file });
+  t.fake.pickScript.push(t.pickSid('s1'));
+  await t.tabs.open();
+  assert.equal(t.writes('s1').length, 1);
+  t.fake.panels[0].webview.handler({ type: 'relayReady' });
+  await settle();
+  const writes = t.writes('s1');
+  assert.equal(writes.length, 2);
+  assert.deepEqual([writes[1].title, writes[1].data], [writes[0].title, writes[0].data]);
+});
+
+test('a restored panel whose state has a null sessionId stays unbound and leaves the legacy key', async () => {
+  const t = setup({ stored: 's1' });
+  const p = t.fake.makePanel();
+  await t.tabs.serializer.deserializeWebviewPanel(p, { sessionId: null });
+  await settle();
+  assert.doesNotMatch(p.webview.html, /<iframe/);
+  assert.match(p.webview.html, /id="connect"/);
+  assert.equal(t.store.get(SESSION_KEY), 's1');
 });

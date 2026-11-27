@@ -152,6 +152,8 @@ function createTabs({ vscode, extensionUri, randomBytes, getServerUrl, source, t
       }
     } catch (e) {
       reportFailure(e);
+      // A transient host that never got a session would be a blank tab.
+      if (transient && host && !host.sid && !host.view.isDisposed()) host.view.dispose();
     } finally { picking = false; }
   }
 
@@ -169,8 +171,9 @@ function createTabs({ vscode, extensionUri, randomBytes, getServerUrl, source, t
         let sid = state?.sessionId ?? null;
         if (sid && bySid.has(sid)) { panel.dispose(); return; }
         const tab = adopt(panel);
-        // A panel with no state of its own is the single tab of the pre-upgrade extension: its session is in workspaceState.
-        if (!sid) sid = (await takeLegacySessionId()) ?? null;
+        // A panel with no state of its own (no sessionId key at all; an unbound or ended tab persists null) is the single
+        // tab of the pre-upgrade extension: its session is in workspaceState.
+        if (!sid && !(state && 'sessionId' in state)) sid = (await takeLegacySessionId()) ?? null;
         if (sid && !bySid.has(sid)) {
           bySid.set(sid, tab);
           tab.start(sid).catch(reportFailure);

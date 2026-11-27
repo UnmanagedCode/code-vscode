@@ -17,6 +17,7 @@ const RELAY_READY_TIMEOUT_MS = 15_000;
 function createTab({ vscode, view, writer, endpoints, onState, onUnbound, pushTo }) {
   // Bumped when the tab closes; a start/bind/load that began earlier abandons its remaining steps.
   let generation = 0;
+  let disposed = false;
   let relay = false;
   // The page shown while no session is bound, and the session id the panel keeps in its state across a reload.
   let notice = null;
@@ -163,7 +164,8 @@ function createTab({ vscode, view, writer, endpoints, onState, onUnbound, pushTo
 
     /** One chip write's outcome; the state changes and notifications only on a state change. */
     async onChipResult(result) {
-      if (!tab.sid || tab.state?.kind === 'connecting') return;
+      // A write still in flight when the tab closed resolves for a tab that no longer exists.
+      if (disposed || !tab.sid || tab.state?.kind === 'connecting') return;
       if (result.ok) {
         if (tab.state.kind !== 'connected') setState({ kind: 'connected' });
         return;
@@ -181,7 +183,7 @@ function createTab({ vscode, view, writer, endpoints, onState, onUnbound, pushTo
       if (tab.state?.kind === 'connected' || tab.state?.kind === 'view-only') pushTo(tab);
     },
 
-    dispose() { generation += 1; writer.dispose(); },
+    dispose() { disposed = true; generation += 1; writer.dispose(); },
   });
 
   return tab;

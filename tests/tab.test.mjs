@@ -149,3 +149,18 @@ test('relay ready while connected pushes; while not connected it does not', asyn
   t.tab.onRelayReady();
   assert.equal(t.log.pushes, n + 1);
 });
+
+test('a chip result that arrives after the tab closed notifies nothing and changes no state', async () => {
+  const t = setup({ conductors: live });
+  await t.tab.start('s1');
+  t.tab.dispose();
+  t.close();
+  const states = t.log.states;
+  const shown = t.log.view.length;
+  for (const code of ['REQUEST_FAILED', 'SESSION_NOT_LIVE', 'VIEW_ONLY']) await t.tab.onChipResult({ ok: false, code });
+  assert.equal(t.log.messages.length, 0);
+  assert.equal(t.log.states, states);
+  assert.equal(t.log.view.length, shown);
+  assert.equal(t.tab.state.kind, 'connected');
+  assert.deepEqual(t.log.unbound, []);
+});
