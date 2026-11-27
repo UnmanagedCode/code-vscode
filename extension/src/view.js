@@ -108,6 +108,8 @@ function createTabView({ vscode, extensionUri, randomBytes, panel }) {
     isDisposed() { return disposed; },
     /** Whether the panel is its group's shown editor in a visible group (not focus). */
     isVisible() { return !disposed && panel.visible; },
+    /** The editor group the panel is in, or undefined once disposed. */
+    viewColumn() { return disposed ? undefined : panel.viewColumn; },
     isActive() { return !disposed && panel.active; },
     reveal() { if (!disposed) panel.reveal(); },
     dispose() { if (!disposed) panel.dispose(); },

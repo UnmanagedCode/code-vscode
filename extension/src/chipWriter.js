@@ -1,5 +1,5 @@
 'use strict';
-// One session's chip write queue: at most one write in flight, newest state wins, and the file-chip dedupe.
+// One session's chip write queue: at most one write in flight, newest state wins, the file-chip dedupe, and the newest chip seq this tab received.
 
 /**
  * deps:
@@ -10,6 +10,8 @@ function createChipWriter({ send, onResult }) {
   let enabled = false;
   // Path of the file chip most recently queued; a repeat is skipped so the composer's × sticks until something changes.
   let lastFileKey = null;
+  // Seq of the newest chip this tab holds or deliberately skipped; null when unknown.
+  let lastSeq = null;
   let pending = null;
   let writing = false;
 
@@ -23,6 +25,7 @@ function createChipWriter({ send, onResult }) {
         try { result = await send(message); } catch (e) { result = { ok: false, code: 'REQUEST_FAILED', error: String(e?.message ?? e) }; }
         // Only when no newer write for this file is queued: that one owns the baseline now.
         if (!result.ok && key !== null && lastFileKey === key && pending?.key !== key) lastFileKey = null;
+        if (!result.ok && pending === null) lastSeq = null;
         onResult(result);
       }
     } finally { writing = false; }
@@ -30,10 +33,13 @@ function createChipWriter({ send, onResult }) {
 
   return {
     enable() { enabled = true; },
-    disable() { enabled = false; pending = null; lastFileKey = null; },
+    disable() { enabled = false; pending = null; lastFileKey = null; lastSeq = null; },
+    /** Whether this tab already received the chip with `seq` (or a newer one). */
+    has(seq) { return lastSeq != null && lastSeq >= seq; },
     /** Queues `chip` ({kind, key?, title, data}); a file chip repeating the last written path is skipped unless `force`. */
     offer(chip, { force = false } = {}) {
       if (!enabled) return;
+      lastSeq = chip.seq;
       let key = null;
       if (chip.kind === 'file') {
         if (!force && lastFileKey === chip.key) return;

@@ -7,13 +7,14 @@ const { createTabs } = require('../extension/src/tabs.js');
 const { SESSION_KEY, takeLegacySessionId } = require('../extension/src/migrations.js');
 
 const live = [{ sessionId: 's1', displayLabel: 'Refactor auth', status: 'idle' }, { sessionId: 's2', displayLabel: 'Fix build', status: 'busy' }];
-const chip = { kind: 'selection', title: 'a.ts:1', data: 'x' };
+const chip = { kind: 'selection', title: 'a.ts:1', data: 'x', seq: 1 };
+const chip2 = { kind: 'selection', title: 'a.ts:2', data: 'y', seq: 2 };
 
 function setup({ conductors = live, stored, current = null, relay, serverUrl } = {}) {
   const fake = createFakeVscode({ conductors, relay, serverUrl });
   const store = new Map(stored ? [[SESSION_KEY, stored]] : []);
   const workspaceState = { get: (k) => store.get(k), update: async (k, v) => { if (v === undefined) store.delete(k); else store.set(k, v); } };
-  const source = { current, refresh: () => source.current };
+  const source = { current, shown: null, columns: [], refresh: () => source.current, latestShown: (c) => { source.columns.push(c); return source.shown; } };
   const tabs = createTabs({
     vscode: fake.vscode, extensionUri: 'ext', randomBytes: () => ({ toString: () => 'n' }),
     getServerUrl: () => fake.config.serverUrl, source,
@@ -169,24 +170,6 @@ test('a chip goes to visible bound tabs only', async () => {
   assert.deepEqual(t.writes().map((m) => m.sid), ['s1']);
 });
 
-test('a hidden tab that becomes visible receives nothing until the next chip', async () => {
-  const t = setup();
-  await openTwo(t);
-  t.fake.panels[1].setVisible(false);
-  t.tabs.onChip(chip);
-  await settle();
-  const before = t.writes('s2').length;
-  // a real current chip, so a visibility-triggered push would write it
-  t.source.current = chip;
-  t.fake.panels[1].setVisible(true);
-  t.fake.panels[1].setActive(true);
-  await settle();
-  assert.equal(t.writes('s2').length, before);
-  t.tabs.onChip(chip);
-  await settle();
-  assert.equal(t.writes('s2').length, before + 1);
-});
-
 test('a forced push (bind, start, relay ready) writes only to a visible tab', async () => {
   const t = setup({ current: chip });
   // restore while hidden: no write from start's push
@@ -316,4 +299,118 @@ test('a restored panel whose state has a null sessionId stays unbound and leaves
   assert.doesNotMatch(p.webview.html, /<iframe/);
   assert.match(p.webview.html, /id="connect"/);
   assert.equal(t.store.get(SESSION_KEY), 's1');
+});
+
+const hideShow = (panel) => { panel.setVisible(false); panel.setVisible(true); };
+
+test('a tab shown again gets the latest chip it missed, once', async () => {
+  const t = setup();
+  await openTwo(t);
+  t.fake.panels[0].setVisible(false);
+  t.tabs.onChip(chip);
+  await settle();
+  assert.deepEqual(t.writes().map((m) => m.sid), ['s2']);
+  t.source.shown = chip;
+  t.fake.panels[0].setVisible(true);
+  await settle();
+  assert.equal(t.writes('s1').length, 1);
+  assert.deepEqual([t.writes('s1')[0].title, t.writes('s1')[0].data], [chip.title, chip.data]);
+  assert.ok(t.source.columns.includes(2));
+  hideShow(t.fake.panels[0]);
+  await settle();
+  assert.equal(t.writes('s1').length, 1);
+});
+
+test('a tab shown again gets nothing it already received, so a x stays cleared', async () => {
+  const t = setup();
+  await openTwo(t);
+  t.tabs.onChip(chip);
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
+  t.source.shown = chip;
+  hideShow(t.fake.panels[1]);
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
+});
+
+test('a selection produced while the tab was hidden is caught up after an earlier one it had', async () => {
+  const t = setup();
+  await openTwo(t);
+  t.tabs.onChip(chip);
+  t.fake.panels[1].setVisible(false);
+  t.tabs.onChip(chip2);
+  await settle();
+  t.source.shown = chip2;
+  t.fake.panels[1].setVisible(true);
+  await settle();
+  assert.equal(t.writes('s2').at(-1).title, chip2.title);
+});
+
+test('a failed catch-up write is retried on the next show', async () => {
+  let failed = 0;
+  const t = setup({ relay: (m) => (m.op === 'setChip' && m.sid === 's2' && failed++ === 0 ? { ok: false, code: 'REQUEST_FAILED', error: 'x' } : null) });
+  await openTwo(t);
+  t.fake.panels[1].setVisible(false);
+  t.tabs.onChip(chip);
+  await settle();
+  t.source.shown = chip;
+  t.fake.panels[1].setVisible(true);
+  await settle();
+  hideShow(t.fake.panels[1]);
+  await settle();
+  assert.equal(t.writes('s2').length, 2);
+});
+
+test('only a hidden-to-visible transition catches up; a revived visible tab is written once', async () => {
+  const t = setup({ current: chip });
+  t.source.shown = chip;
+  const p = t.fake.makePanel({ visible: true });
+  await t.tabs.serializer.deserializeWebviewPanel(p, { sessionId: 's1' });
+  await settle();
+  assert.equal(t.writes('s1').length, 1);
+  p.setActive(true);
+  p.setVisible(true);
+  await settle();
+  assert.equal(t.writes('s1').length, 1);
+  hideShow(p);
+  await settle();
+  assert.equal(t.writes('s1').length, 1);
+});
+
+test('a catch-up file chip respects the tab\'s file dedupe', async () => {
+  const file1 = { kind: 'file', key: '/a.ts', title: 'a.ts', data: 'path: /a.ts', seq: 1 };
+  const file2 = { ...file1, seq: 2 };
+  const t = setup();
+  await openTwo(t);
+  t.tabs.onChip(file1);
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
+  t.fake.panels[1].setVisible(false);
+  t.tabs.onChip(file2);
+  t.source.shown = file2;
+  t.fake.panels[1].setVisible(true);
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
+});
+
+test('a visible tab whose write failed is retried only by a real hidden-to-visible transition', async () => {
+  let failed = 0;
+  const t = setup({ relay: (m) => (m.op === 'setChip' && m.sid === 's2' && failed++ === 0 ? { ok: false, code: 'REQUEST_FAILED', error: 'x' } : null) });
+  await openTwo(t);
+  t.tabs.onChip(chip); // s2's write fails and forgets the seq
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
+  t.source.shown = chip;
+  const p = t.fake.panels[1];
+  p.setActive(false);
+  p.setActive(true);
+  p.setVisible(true);
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
+  p.setVisible(false); // hiding alone writes nothing
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
+  hideShow(p);
+  await settle();
+  assert.equal(t.writes('s2').length, 2);
 });

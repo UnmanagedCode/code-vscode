@@ -116,3 +116,48 @@ test('every result is reported, and a rejected send is a REQUEST_FAILED result',
   t.writer.offer(sel(2)); await settle();
   assert.deepEqual(t.results.map((r) => r.code ?? 'ok'), ['VIEW_ONLY', 'REQUEST_FAILED']);
 });
+
+const seqd = (chip, seq) => ({ ...chip, seq });
+
+test('has(seq) is true after an offer of that seq, including a file chip the dedupe skipped', async () => {
+  const t = setup();
+  assert.equal(t.writer.has(1), false);
+  t.writer.offer(seqd(file('/a.ts'), 1)); await settle();
+  t.writer.offer(seqd(file('/a.ts'), 2)); await settle();
+  assert.equal(t.sent.length, 1);
+  assert.equal(t.writer.has(2), true);
+  assert.equal(t.writer.has(3), false);
+});
+
+test('a failed write with nothing queued after it forgets the received seq; one with a newer write queued does not', async () => {
+  const t = setup();
+  t.gates.push(Promise.resolve({ ok: false, code: 'REQUEST_FAILED' }));
+  t.writer.offer(seqd(sel(1), 1)); await settle();
+  assert.equal(t.writer.has(1), false);
+
+  const u = setup();
+  let fail;
+  u.gates.push(new Promise((r) => { fail = r; }));
+  u.writer.offer(seqd(sel(1), 1)); await settle();
+  u.writer.offer(seqd(sel(2), 2));
+  fail({ ok: false, code: 'REQUEST_FAILED' });
+  await settle(); await settle();
+  assert.equal(u.sent.length, 2);
+  assert.equal(u.writer.has(2), true);
+});
+
+test('disable forgets the received seq', async () => {
+  const t = setup();
+  t.writer.offer(seqd(sel(1), 1)); await settle();
+  assert.equal(t.writer.has(1), true);
+  t.writer.disable(); t.writer.enable();
+  assert.equal(t.writer.has(1), false);
+});
+
+test('an offer while disabled records nothing, so the tab is still caught up later', async () => {
+  const t = setup();
+  t.writer.disable();
+  t.writer.offer(seqd(sel(1), 1));
+  t.writer.enable();
+  assert.equal(t.writer.has(1), false);
+});
