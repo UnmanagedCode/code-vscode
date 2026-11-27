@@ -24,6 +24,7 @@ function boot() {
 
 const editor = (text = 'foo') => ({
   document: { fileName: '/w/a.ts', languageId: 'typescript', isClosed: false, uri: { scheme: 'file', fsPath: '/w/a.ts', toString: () => 'file:///w/a.ts' }, getText: () => text },
+  viewColumn: 1,
   selection: { start: { line: 0, character: 0 }, end: { line: 0, character: text.length } },
 });
 
@@ -75,4 +76,77 @@ test('the serializer registered for VIEW_TYPE restores two panels bound to their
   assert.deepEqual([p1.title, p2.title], ['cc: Refactor auth', 'cc: Fix build']);
   assert.match(p1.webview.html, /focus=s1/);
   assert.match(p2.webview.html, /focus=s2/);
+});
+
+async function openTwoTabs(t) {
+  t.fake.pickScript.push(t.pickSid('s1'));
+  await t.open();
+  t.fake.pickScript.push(t.pickSid('s2'));
+  await t.open();
+}
+const produce = async (t, ed) => { t.fake.fireSelection(ed); mock.timers.tick(SELECTION_DEBOUNCE_MS); await settle(); };
+const hideShow = (panel) => { panel.setVisible(false); panel.setVisible(true); };
+
+test('switching to a hidden cc tab catches it up with the chip from a still-visible editor, once', async () => {
+  const t = boot();
+  await openTwoTabs(t);
+  const ed = editor('foo');
+  t.fake.panels[0].setVisible(false);
+  t.fake.vscode.window.visibleTextEditors = [ed];
+  await produce(t, ed);
+  const w1 = t.fake.requests('setChip').filter((m) => m.sid === 's2');
+  assert.equal(w1.length, 1);
+  assert.equal(t.fake.requests('setChip').filter((m) => m.sid === 's1').length, 0);
+  t.fake.panels[0].setVisible(true);
+  await settle();
+  const s1 = t.fake.requests('setChip').filter((m) => m.sid === 's1');
+  assert.equal(s1.length, 1);
+  assert.deepEqual([s1[0].title, s1[0].data], [w1[0].title, w1[0].data]);
+  hideShow(t.fake.panels[0]);
+  await settle();
+  assert.equal(t.fake.requests('setChip').filter((m) => m.sid === 's1').length, 1);
+});
+
+test('a switch writes nothing when the source editor is no longer visible', async () => {
+  const t = boot();
+  await openTwoTabs(t);
+  const ed = editor('foo');
+  t.fake.panels[0].setVisible(false);
+  t.fake.vscode.window.visibleTextEditors = [ed];
+  await produce(t, ed);
+  t.fake.vscode.window.visibleTextEditors = [];
+  t.fake.panels[0].setVisible(true);
+  await settle();
+  assert.equal(t.fake.requests('setChip').filter((m) => m.sid === 's1').length, 0);
+  t.fake.vscode.window.visibleTextEditors = [{ ...ed }];
+  hideShow(t.fake.panels[0]);
+  await settle();
+  assert.equal(t.fake.requests('setChip').filter((m) => m.sid === 's1').length, 0);
+});
+
+test('a cc tab in the source editor\'s own group gets nothing when shown', async () => {
+  const t = boot();
+  await openTwoTabs(t);
+  const ed = editor('foo');
+  t.fake.panels[0].setVisible(false);
+  t.fake.vscode.window.visibleTextEditors = [ed];
+  await produce(t, ed);
+  t.fake.panels[0].viewColumn = 1;
+  t.fake.panels[0].setVisible(true);
+  await settle();
+  assert.equal(t.fake.requests('setChip').filter((m) => m.sid === 's1').length, 0);
+});
+
+test('a chip the visible tab already received is not rewritten on a switch', async () => {
+  const t = boot();
+  await openTwoTabs(t);
+  const ed = editor('foo');
+  t.fake.vscode.window.visibleTextEditors = [ed];
+  await produce(t, ed);
+  assert.equal(t.fake.requests('setChip').filter((m) => m.sid === 's1').length, 1);
+  assert.equal(t.fake.requests('setChip').filter((m) => m.sid === 's2').length, 1);
+  hideShow(t.fake.panels[0]);
+  await settle();
+  assert.equal(t.fake.requests('setChip').filter((m) => m.sid === 's2').length, 1);
+  assert.equal(t.fake.requests('setChip').filter((m) => m.sid === 's1').length, 1);
 });

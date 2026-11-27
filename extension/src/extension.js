@@ -12,6 +12,7 @@ function activate(context, vscode = require('vscode')) {
     onDidChangeTextEditorSelection: vscode.window.onDidChangeTextEditorSelection,
     onDidChangeActiveTextEditor: vscode.window.onDidChangeActiveTextEditor,
     getActiveEditor: () => vscode.window.activeTextEditor,
+    getVisibleEditors: () => vscode.window.visibleTextEditors,
     shape: shapeEditor,
     onChip: (chip) => tabs.onChip(chip),
   });

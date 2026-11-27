@@ -29,13 +29,13 @@ export function createFakeVscode({ serverUrl = 'http://127.0.0.1:8787', conducto
     return { ok: true };
   }
 
-  function makePanel({ visible = true, active = true, auto = true } = {}) {
+  function makePanel({ visible = true, active = true, auto = true, viewColumn = 2 } = {}) {
     const disposers = [];
     const stateListeners = [];
     const posted = [];
     let html = '';
     const p = {
-      title: '', iconPath: null, visible, active, disposed: false, revealed: 0,
+      title: '', iconPath: null, visible, active, viewColumn, disposed: false, revealed: 0,
       webview: {
         options: null, cspSource: 'csp:', posted, handler: null,
         get html() { return html; },
@@ -83,6 +83,7 @@ export function createFakeVscode({ serverUrl = 'http://127.0.0.1:8787', conducto
       onDidChangeTextEditorSelection: selection.on,
       onDidChangeActiveTextEditor: activeEditor.on,
       activeTextEditor: undefined,
+      visibleTextEditors: [],
     },
     commands: { registerCommand: (id, fn) => { commands.set(id, fn); return { dispose() {} }; } },
     workspace: { getConfiguration: () => ({ get: (k) => config[k] }) },

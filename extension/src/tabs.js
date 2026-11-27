@@ -22,7 +22,7 @@ const STATUS_TEXT = {
  *   vscode — window.createWebviewPanel / showQuickPick / showErrorMessage / createStatusBarItem and the tabs' own needs
  *   extensionUri, randomBytes(n)
  *   getServerUrl() — the codeConductor.serverUrl setting
- *   source — chipSync's refresh()
+ *   source — chipSync's refresh() and latestShown(column)
  *   takeLegacySessionId() — migrations: the session of the pre-upgrade single tab, once
  */
 function createTabs({ vscode, extensionUri, randomBytes, getServerUrl, source, takeLegacySessionId }) {
@@ -48,6 +48,13 @@ function createTabs({ vscode, extensionUri, randomBytes, getServerUrl, source, t
     if (chip) tab.writer.offer(chip, { force: true });
   }
 
+  /** A tab shown again gets the chip it missed, when the editor that produced it is still visible beside it. */
+  function catchUp(tab) {
+    if (!tab.sid) return;
+    const chip = source.latestShown(tab.view.viewColumn());
+    if (chip && !tab.writer.has(chip.seq)) tab.writer.offer(chip); // not forced: the file-key dedupe keeps a × on a file chip
+  }
+
   function adopt(panel) {
     const view = createTabView({ vscode, extensionUri, randomBytes, panel });
     let tab;
@@ -66,7 +73,13 @@ function createTabs({ vscode, extensionUri, randomBytes, getServerUrl, source, t
     if (panel.active) lastActive = tab;
     view.on('ready', () => tab.onRelayReady());
     view.on('connect', () => { void open({ target: tab }); });
-    view.on('viewState', ({ active }) => { if (active) { lastActive = tab; refreshBar(); } });
+    let shown = view.isVisible();
+    view.on('viewState', ({ active, visible }) => {
+      if (active) { lastActive = tab; refreshBar(); }
+      const becameVisible = visible && !shown;
+      shown = visible;
+      if (becameVisible) catchUp(tab);
+    });
     view.on('close', () => {
       tab.dispose();
       all.delete(tab);
@@ -161,7 +174,7 @@ function createTabs({ vscode, extensionUri, randomBytes, getServerUrl, source, t
 
   return {
     open,
-    /** Chips go to bound tabs that are visible right now; a hidden tab is not caught up when it is shown. */
+    /** Chips go to bound tabs that are visible right now; a hidden tab catches up when shown (see catchUp). */
     onChip(chip) {
       for (const tab of all) if (tab.sid && tab.view.isVisible()) tab.writer.offer(chip);
     },

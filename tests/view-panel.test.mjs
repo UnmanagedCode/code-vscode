@@ -80,6 +80,15 @@ test('isVisible reads panel.visible; viewState events report active and visible'
   assert.deepEqual(a.events.filter((e) => Array.isArray(e)).map((e) => e[1]), [{ visible: false, active: false }, { visible: false, active: true }]);
 });
 
+test('viewColumn reads panel.viewColumn; undefined once disposed', () => {
+  const { make } = setup();
+  const a = make();
+  a.panel.viewColumn = 3;
+  assert.equal(a.view.viewColumn(), 3);
+  a.panel.dispose();
+  assert.equal(a.view.viewColumn(), undefined);
+});
+
 test('the page button and relay readiness are emitted; messages are tied to the panel that sent them', () => {
   const { make } = setup();
   const a = make();

@@ -28,7 +28,7 @@ Details: [docs/features.md](docs/features.md).
 - code-hub shares behind its login are unsupported (its `hub_auth` cookie is `SameSite=Lax`, which Chromium drops in the tab's cross-site iframe).
 - Plain `http://` on a non-loopback address is unsupported (presumed blocked as mixed content).
 - Desktop VS Code only; browser-hosted VS Code (vscode.dev, code-server) is untested and not admitted.
-- Chips reach only cc tabs that are visible when the chip is written. A hidden tab, including a cc tab in the same editor group as the file being edited, gets nothing and is not caught up when shown.
+- Chips reach only visible cc tabs. A tab shown later gets the chip it missed only if the editor that produced it is still visible and the tab didn't already get it. A cc tab in the same editor group as the file is therefore never caught up from it, and a chip cleared with × does not return on a switch.
 - After a reload, a session whose background tab has not been shown yet opens a second tab when picked; the stale tab closes when shown.
 - Only the primary selection of a multi-cursor selection is chipped; no path mapping for a remote cc.
 - A never-prompted conductor whose cc tab is closed, or hidden behind another tab at window reload, is reaped by cc after 60 s.
