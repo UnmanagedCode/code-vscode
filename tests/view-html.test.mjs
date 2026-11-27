@@ -33,3 +33,9 @@ test('URLs are escaped into attributes', () => {
   const html = renderHtml({ ...base, ccOrigin: 'http://h', relayUrl: 'http://h/r', documentUrl: 'http://h/?a="><script>x</script>' });
   assert.doesNotMatch(html, /<script>x/);
 });
+
+test('renderHtml puts the session id on body as data-session-id, empty when unbound', () => {
+  const bound = renderHtml({ ...base, ccOrigin: 'http://h', relayUrl: 'http://h/r', sessionId: 's"1' });
+  assert.match(bound, /<body[^>]* data-session-id="s&quot;1"/);
+  assert.match(renderHtml({ ...base, message: 'x' }), /<body[^>]* data-session-id=""/);
+});

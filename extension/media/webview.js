@@ -7,6 +7,9 @@
   const relayFrame = document.getElementById('relay');
   const ccFrame = document.getElementById('cc');
 
+  // The panel's persisted state: VS Code hands it back to the serializer, so a restored tab knows its session.
+  vscode.setState({ sessionId: document.body.dataset.sessionId || null });
+
   const connect = document.getElementById('connect');
   if (connect) connect.addEventListener('click', () => vscode.postMessage({ type: 'connect' }));
 
@@ -29,6 +32,7 @@
       relayFrame.contentWindow.postMessage(msg.msg, ccOrigin);
     } else if (msg.type === 'showDocument' && ccFrame && ccOrigin && new URL(msg.url).origin === ccOrigin) {
       ccFrame.src = msg.url;
+      vscode.setState({ sessionId: msg.sessionId ?? null });
     }
   });
 })();

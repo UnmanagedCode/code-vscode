@@ -1,7 +1,7 @@
 {
   "name": "code-vscode",
   "displayName": "Code Conductor",
-  "description": "Shows one cc conductor session in a VS Code editor tab and turns the editor selection, or the active file, into its context chip.",
+  "description": "Shows cc conductor sessions in VS Code editor tabs and turns the editor selection, or the active file, into its context chip.",
   "version": "0.1.0",
   "publisher": "code-conductor",
   "license": "UNLICENSED",
@@ -26,14 +26,6 @@
           "light": "media/icon-light.svg",
           "dark": "media/icon-dark.svg"
         }
-      },
-      {
-        "command": "codeConductor.connect",
-        "title": "cc: Connect"
-      },
-      {
-        "command": "codeConductor.disconnect",
-        "title": "cc: Disconnect"
       }
     ],
     "configuration": {

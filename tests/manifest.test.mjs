@@ -37,3 +37,10 @@ test('the command icons point at files that exist', () => {
   const icon = manifest.contributes.commands.find((c) => c.icon).icon;
   for (const path of [icon.light, icon.dark]) readFileSync(new URL(`../extension/${path}`, import.meta.url));
 });
+
+test('contributed commands are exactly those registered', () => {
+  const src = readFileSync(new URL('../extension/src/extension.js', import.meta.url), 'utf8');
+  const registered = new Set([...src.matchAll(/registerCommand\('([^']+)'/g)].map((m) => m[1]));
+  const contributed = new Set(manifest.contributes.commands.map((c) => c.command));
+  assert.deepEqual([...contributed].sort(), [...registered].sort());
+});

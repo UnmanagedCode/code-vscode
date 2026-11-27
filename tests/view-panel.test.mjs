@@ -1,79 +1,113 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const { createView } = createRequire(import.meta.url)('../extension/src/view.js');
-
-function fakePanel() {
-  const disposers = [];
-  const posted = [];
-  const p = {
-    title: '', iconPath: null, revealed: 0, disposed: false,
-    webview: { options: null, html: '', cspSource: 'csp:', posted, handler: null, asWebviewUri: (u) => u, postMessage: (m) => posted.push(m), onDidReceiveMessage: (fn) => { p.webview.handler = fn; } },
-    onDidDispose: (fn) => disposers.push(fn),
-    reveal() { p.revealed += 1; },
-    dispose() { p.disposed = true; disposers.forEach((fn) => fn()); },
-  };
-  return p;
-}
+import { createFakeVscode } from './fakes/vscode.mjs';
+const { createTabView, createPanel, VIEW_TYPE } = createRequire(import.meta.url)('../extension/src/view.js');
 
 function setup() {
-  const created = [];
-  const vscode = {
-    ViewColumn: { Beside: -2 },
-    Uri: { joinPath: (...a) => a.join('/') },
-    window: { createWebviewPanel: (type, title, show, options) => { const p = fakePanel(); created.push({ p, type, show, options }); return p; } },
+  const fake = createFakeVscode();
+  const make = (opts) => {
+    const panel = fake.makePanel({ auto: false, ...opts });
+    const view = createTabView({ vscode: fake.vscode, extensionUri: 'ext', randomBytes: () => ({ toString: () => 'n' }), panel });
+    const events = [];
+    for (const n of ['ready', 'connect', 'close']) view.on(n, () => events.push(n));
+    view.on('viewState', (s) => events.push(['viewState', s]));
+    return { panel, view, events };
   };
-  const view = createView({ vscode, extensionUri: 'ext', randomBytes: () => ({ toString: () => 'n' }) });
-  const events = [];
-  for (const n of ['resolve', 'close']) view.on(n, () => events.push(n));
-  return { view, created, events };
+  return { fake, make };
 }
 
-test('reveal creates one panel beside the editor, retained and scripted, and a second reveal reuses it', () => {
-  const t = setup();
-  t.view.reveal();
-  assert.equal(t.created.length, 1);
-  assert.equal(t.created[0].show.viewColumn, -2);
-  assert.equal(t.created[0].options.retainContextWhenHidden, true);
-  assert.equal(t.created[0].options.enableScripts, true);
-  assert.deepEqual(t.events, ['resolve']);
-  t.view.reveal();
-  assert.equal(t.created.length, 1);
-  assert.equal(t.created[0].p.revealed, 1);
+test('two tab views keep separate channels: a result reaches only its own request, ready only its own waiters', async () => {
+  const { make } = setup();
+  const a = make();
+  const b = make();
+  const reqA = a.view.request({ op: 'health' });
+  const reqB = b.view.request({ op: 'health' });
+  const readyB = b.view.whenReady(60_000);
+  const idA = a.panel.webview.posted[0].msg.reqId;
+  const idB = b.panel.webview.posted[0].msg.reqId;
+  assert.equal(idA, idB, 'each view numbers its own requests');
+  a.panel.webview.handler({ type: 'relayResult', msg: { type: 'result', reqId: idA, ok: true, value: 'A' } });
+  assert.equal((await reqA).value, 'A');
+  let bDone = false;
+  void reqB.then(() => { bDone = true; });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(bDone, false);
+  a.panel.webview.handler({ type: 'relayReady' });
+  assert.deepEqual(a.events, ['ready']);
+  assert.deepEqual(b.events, []);
+  b.panel.webview.handler({ type: 'relayReady' });
+  await readyB;
+  b.panel.webview.handler({ type: 'relayResult', msg: { type: 'result', reqId: idB, ok: true } });
+  assert.equal((await reqB).ok, true);
 });
 
-test('a restored panel is adopted and later reveals reuse it; a second restored panel is disposed', async () => {
-  const t = setup();
-  const restored = fakePanel();
-  await t.view.serializer.deserializeWebviewPanel(restored);
-  assert.deepEqual(t.events, ['resolve']);
-  assert.equal(t.view.isOpen(), true);
-  assert.equal(restored.webview.options.enableScripts, true);
-  t.view.reveal();
-  assert.equal(t.created.length, 0);
-  assert.equal(restored.revealed, 1);
-  const extra = fakePanel();
-  await t.view.serializer.deserializeWebviewPanel(extra);
-  assert.equal(extra.disposed, true);
-  assert.equal(restored.disposed, false);
-  assert.equal(t.view.isOpen(), true);
+test('disposing one panel fails only its own pending requests, rejects its waiters and emits close', async () => {
+  const { make } = setup();
+  const a = make();
+  const b = make();
+  const reqA = a.view.request({ op: 'health' });
+  const reqB = b.view.request({ op: 'health' });
+  const ready = a.view.whenReady(60_000);
+  const rejected = assert.rejects(ready);
+  a.panel.dispose();
+  assert.equal((await reqA).code, 'REQUEST_FAILED');
+  await rejected;
+  assert.deepEqual(a.events, ['close']);
+  assert.deepEqual(b.events, []);
+  assert.equal(a.view.isDisposed(), true);
+  assert.equal(b.view.isDisposed(), false);
+  assert.equal((await a.view.request({ op: 'health' })).code, 'REQUEST_FAILED');
+  b.panel.webview.handler({ type: 'relayResult', msg: { type: 'result', reqId: b.panel.webview.posted[0].msg.reqId, ok: true } });
+  assert.equal((await reqB).ok, true);
 });
 
-test('disposing the panel fails pending requests, rejects waiters, emits close and lets reveal create a new panel', async () => {
-  const t = setup();
-  t.view.reveal();
-  const req = t.view.request({ op: 'health' });
-  const ready = t.view.whenReady(60_000);
-  t.created[0].p.dispose();
-  assert.equal((await req).code, 'REQUEST_FAILED');
-  await assert.rejects(ready);
-  assert.deepEqual(t.events, ['resolve', 'close']);
-  assert.equal(t.view.isOpen(), false);
-  t.view.reveal();
-  assert.equal(t.created.length, 2);
+test('setDocument posts showDocument with the url and the sessionId', () => {
+  const { make } = setup();
+  const a = make();
+  a.view.setDocument('http://h/plugins/code-vscode/?focus=s1', 's1');
+  assert.deepEqual(a.panel.webview.posted.at(-1), { type: 'showDocument', url: 'http://h/plugins/code-vscode/?focus=s1', sessionId: 's1' });
 });
 
-test('a request with no panel resolves REQUEST_FAILED', async () => {
-  const t = setup();
-  assert.equal((await t.view.request({ op: 'health' })).code, 'REQUEST_FAILED');
+test('isVisible reads panel.visible; viewState events report active and visible', () => {
+  const { make } = setup();
+  const a = make({ visible: true, active: false });
+  assert.equal(a.view.isVisible(), true);
+  assert.equal(a.view.isActive(), false);
+  a.panel.setVisible(false);
+  assert.equal(a.view.isVisible(), false);
+  a.panel.setActive(true);
+  assert.deepEqual(a.events.filter((e) => Array.isArray(e)).map((e) => e[1]), [{ visible: false, active: false }, { visible: false, active: true }]);
+});
+
+test('the page button and relay readiness are emitted; messages are tied to the panel that sent them', () => {
+  const { make } = setup();
+  const a = make();
+  a.panel.webview.handler({ type: 'connect' });
+  assert.deepEqual(a.events, ['connect']);
+});
+
+test('createPanel opens beside the editor, retained and scripted; reveal and setTitle reach the panel', () => {
+  const { fake, make } = setup();
+  const p = createPanel(fake.vscode, 'ext');
+  assert.equal(fake.panels.length, 1);
+  assert.equal(p.created.type, VIEW_TYPE);
+  assert.equal(p.created.show.viewColumn, -2);
+  assert.equal(p.created.options.retainContextWhenHidden, true);
+  assert.equal(p.created.options.enableScripts, true);
+  const a = make();
+  a.view.reveal();
+  assert.equal(a.panel.revealed, 1);
+  a.view.setTitle('cc: x');
+  assert.equal(a.panel.title, 'cc: x');
+});
+
+test('load renders the session id into the page, showMessage renders an unbound page', () => {
+  const { make } = setup();
+  const a = make();
+  a.view.load({ ccOrigin: 'http://h', relayUrl: 'http://h/r', documentUrl: 'http://h/d', sessionId: 's1' });
+  assert.match(a.panel.webview.html, /data-session-id="s1"/);
+  a.view.showMessage('hello');
+  assert.match(a.panel.webview.html, /data-session-id=""/);
+  assert.doesNotMatch(a.panel.webview.html, /<iframe/);
 });
