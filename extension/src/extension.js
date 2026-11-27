@@ -1,46 +1,34 @@
 'use strict';
 // Wiring only: builds the collaborators and registers them once.
-const vscode = require('vscode');
 const { randomBytes } = require('node:crypto');
-const { createView, VIEW_TYPE } = require('./view');
+const { VIEW_TYPE } = require('./view');
 const { createChipSync } = require('./chipSync');
-const { createConnection } = require('./connection');
+const { createTabs } = require('./tabs');
+const { takeLegacySessionId } = require('./migrations');
 const { shapeEditor } = require('./chipShape');
 
-function activate(context) {
-  const view = createView({ vscode, extensionUri: context.extensionUri, randomBytes });
-
-  const sync = createChipSync({
+function activate(context, vscode = require('vscode')) {
+  const source = createChipSync({
     onDidChangeTextEditorSelection: vscode.window.onDidChangeTextEditorSelection,
     onDidChangeActiveTextEditor: vscode.window.onDidChangeActiveTextEditor,
     getActiveEditor: () => vscode.window.activeTextEditor,
     shape: shapeEditor,
-    send: (message) => connection.sendChip(message),
-    onResult: (result) => connection.onChipResult(result),
+    onChip: (chip) => tabs.onChip(chip),
   });
 
-  const connection = createConnection({
+  const tabs = createTabs({
     vscode,
-    workspaceState: context.workspaceState,
+    extensionUri: context.extensionUri,
+    randomBytes,
     getServerUrl: () => vscode.workspace.getConfiguration('codeConductor').get('serverUrl'),
-    view,
-    sync,
+    source,
+    takeLegacySessionId: () => takeLegacySessionId(context.workspaceState),
   });
-
-  // Before the serializer is registered, so a restored tab's resume() wins.
-  connection.init();
-
-  view.on('resolve', () => { void connection.resume(); });
-  view.on('close', () => connection.onClosed());
-  view.on('ready', () => connection.onRelayReady());
-  view.on('connect', () => { void connection.connect(); });
 
   context.subscriptions.push(
-    vscode.window.registerWebviewPanelSerializer(VIEW_TYPE, view.serializer),
-    vscode.commands.registerCommand('codeConductor.open', () => connection.open()),
-    vscode.commands.registerCommand('codeConductor.connect', () => connection.connect()),
-    vscode.commands.registerCommand('codeConductor.disconnect', () => connection.disconnect()),
-    { dispose: () => { sync.dispose(); connection.dispose(); } },
+    vscode.window.registerWebviewPanelSerializer(VIEW_TYPE, tabs.serializer),
+    vscode.commands.registerCommand('codeConductor.open', () => tabs.open()),
+    { dispose: () => { source.dispose(); tabs.dispose(); } },
   );
 }
 

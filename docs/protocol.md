@@ -45,9 +45,11 @@ Request `{reqId, op, ...args}`; response `{type: 'result', reqId, ok: true, valu
 
 | Direction | Message |
 |---|---|
-| extension → webview | `{type: 'relayRequest', msg: {reqId, op, ...}}`; `{type: 'showDocument', url}` (applied only for cc's origin) |
-| webview → extension | `{type: 'relayReady'}`; `{type: 'relayResult', msg}` (only from the relay frame with cc's origin); `{type: 'connect'}` (Connect button) |
+| extension → webview | `{type: 'relayRequest', msg: {reqId, op, ...}}`; `{type: 'showDocument', url, sessionId}` (applied only for cc's origin; `sessionId` becomes the panel's webview state) |
+| webview → extension | `{type: 'relayReady'}`; `{type: 'relayResult', msg}` (only from the relay frame with cc's origin); `{type: 'connect'}` (Connect button; runs the picker for that tab) |
 
+- Webview state: `webview.js` calls `setState({sessionId})` on load (from `<body data-session-id>`, empty → `null`) and on `showDocument`. `registerWebviewPanelSerializer` hands it back as `state`; `state.sessionId` names the session the restored tab shows. A panel with no state is the pre-upgrade tab (see `docs/architecture.md`, on-disk state).
+- Each panel has its own channel: request ids, the ready flag and pending requests are per panel. The picker's `listConductors` and `newConductor` run through whichever ready tab hosts it.
 - Extension → relay uses an explicit target origin (cc's). The extension times a request out at 12 s (`REQUEST_TIMEOUT_MS`), above the relay's 10 s.
 - Webview CSP: `default-src 'none'; frame-src <ccOrigin>` (or `'none'`); `script-src 'nonce-<n>'`; `style-src <cspSource> 'unsafe-inline'`.
 - Messages from the embedded cc frame are ignored.
