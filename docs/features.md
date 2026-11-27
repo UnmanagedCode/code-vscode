@@ -6,7 +6,7 @@
 - Open it with the editor-title button (shown on file and untitled text editors: `activeEditor` is `workbench.editors.files.textFileEditor` or `workbench.editors.textResourceEditor`; hidden on the cc tab itself, diffs, notebooks, image previews and settings), **cc: Open**, or a click on the status bar item. A new tab opens beside the current editor; with a tab already open it is revealed, never duplicated.
 - It keeps its state while hidden behind another tab of its group (`retainContextWhenHidden`), so chips keep flowing.
 - A window reload restores the tab (serializer) and reconnects to the stored session.
-- Closing the tab keeps the stored session and stops chip sync; the status bar shows `cc: tab closed` and reopening reconnects to the same session. A conductor that was never prompted is reaped by cc once its tab stays closed for longer than `PRISTINE_REAP_GRACE_MS` (60 s); reopening then shows "session ended".
+- Closing the tab keeps the stored session and stops chip sync; the status bar shows `cc: tab closed` and reopening reconnects to the same session. A conductor that was never prompted is reaped by cc once its tab stays closed for longer than `PRISTINE_REAP_GRACE_MS` (60 s); the reaped session then surfaces as "session ended" on the next chip write after reopening.
 - Not connected (or ended): text plus a **Connect** button.
 - Connected: cc's conductor session for the stored session id, framed from `<cc>/plugins/code-vscode/?focus=<sid>`. The workers panel navigates normally.
 

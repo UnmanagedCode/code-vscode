@@ -195,3 +195,17 @@ test('every write\'s result is reported, and a rejected send is a REQUEST_FAILED
   fire(t); tick(); await settle();
   assert.deepEqual(t.results.map((r) => r.code ?? 'ok'), ['VIEW_ONLY', 'REQUEST_FAILED']);
 });
+
+test('a failed file-chip write does not reset the baseline when a forced write for the same file is already queued', async () => {
+  const t = setup();
+  t.state.editor = { chip: fileChip('/a.ts') };
+  let fail;
+  t.gates.push(new Promise((r) => { fail = r; }));
+  t.active.fire(t.state.editor); tick(); await settle();
+  t.sync.pushNow();
+  fail({ ok: false, code: 'REQUEST_FAILED' });
+  await settle(); await settle();
+  assert.equal(t.writes.length, 2);
+  fire(t); tick(); await settle();
+  assert.equal(t.writes.length, 2);
+});

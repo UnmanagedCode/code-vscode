@@ -34,7 +34,8 @@ function createChipSync({ onDidChangeTextEditorSelection, onDidChangeActiveTextE
         pending = null;
         let result;
         try { result = await send(message); } catch (e) { result = { ok: false, code: 'REQUEST_FAILED', error: String(e?.message ?? e) }; }
-        if (!result.ok && key !== null && lastFileKey === key) lastFileKey = null;
+        // Only when no newer write for this file is queued: that one owns the baseline now.
+        if (!result.ok && key !== null && lastFileKey === key && pending?.key !== key) lastFileKey = null;
         onResult(result);
       }
     } finally { writing = false; }

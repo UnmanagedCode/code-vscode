@@ -9,6 +9,15 @@ test('the tab can be restored: activation includes onWebviewPanel for the view t
   assert.ok(manifest.activationEvents.includes(`onWebviewPanel:${VIEW_TYPE}`));
 });
 
+test('activation includes onStartupFinished so the status bar entry exists without a tab', () => {
+  assert.ok(manifest.activationEvents.includes('onStartupFinished'));
+});
+
+test('the editor-title button covers file and untitled text editors', () => {
+  const item = manifest.contributes.menus['editor/title'].find((m) => m.command === 'codeConductor.open');
+  assert.equal(item.when, 'activeEditor == workbench.editors.files.textFileEditor || activeEditor == workbench.editors.textResourceEditor');
+});
+
 test('every command used in a menu is contributed', () => {
   const contributed = new Set(manifest.contributes.commands.map((c) => c.command));
   for (const items of Object.values(manifest.contributes.menus ?? {})) {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const { createConnection, SESSION_KEY } = createRequire(import.meta.url)('../extension/src/connection.js');
 
-function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stored, conductors = [], pick, readyFails = false, handlers = {}, open = true } = {}) {
+function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stored, conductors = [], pick, readyFails = false, handlers = {}, open = true, externalGate = null, updateGate = null } = {}) {
   const store = new Map(stored ? [[SESSION_KEY, stored]] : []);
   const log = { view: [], sync: [], messages: [], requests: [], picks: [] };
   const bar = { text: '', show() {}, dispose() {} };
@@ -15,16 +15,17 @@ function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stor
       showWarningMessage: (m) => log.messages.push(['warning', m]),
       showInformationMessage: (m) => log.messages.push(['info', m]),
     },
-    env: { asExternalUri: async (uri) => ({ toString: () => external, uri }) },
+    env: { asExternalUri: async (uri) => { if (externalGate) await externalGate; return { toString: () => external, uri }; } },
     Uri: { parse: (s) => s },
   };
   const tab = { open };
   const view = {
     isOpen: () => tab.open,
     reveal: () => { tab.open = true; log.view.push(['reveal']); },
-    load: (a) => log.view.push(['load', a]),
+    // Like the real view, which throws without a panel.
+    load: (a) => { if (!tab.open) throw new Error('the cc tab is not open'); log.view.push(['load', a]); },
     showMessage: (t) => log.view.push(['message', t]),
-    setDocument: (u) => log.view.push(['document', u]),
+    setDocument: (u) => { if (!tab.open) throw new Error('the cc tab is not open'); log.view.push(['document', u]); },
     whenReady: () => (readyFails ? Promise.reject(new Error('timeout')) : Promise.resolve()),
     request: async (msg) => {
       log.requests.push(msg);
@@ -35,7 +36,7 @@ function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stor
     },
   };
   const sync = { enable: () => log.sync.push('enable'), disable: () => log.sync.push('disable'), pushNow: () => log.sync.push('pushNow') };
-  const workspaceState = { get: (k) => store.get(k), update: async (k, v) => { if (v === undefined) store.delete(k); else store.set(k, v); } };
+  const workspaceState = { get: (k) => store.get(k), update: async (k, v) => { if (updateGate) await updateGate; if (v === undefined) store.delete(k); else store.set(k, v); } };
   const conn = createConnection({ vscode, workspaceState, getServerUrl: () => serverUrl, view, sync });
   return { conn, log, store, bar, tab };
 }
@@ -238,6 +239,7 @@ test('a relay timeout after the tab closed mid-connect shows no error', async ()
   const t = setup({ readyFails: true, conductors: live, pick: (i) => i[0], open: false });
   const done = t.conn.connect();
   t.tab.open = false;
+  t.conn.onClosed();
   await done;
   assert.equal(t.log.messages.length, 0);
   assert.notEqual(t.bar.text, 'cc: RELAY_TIMEOUT');
@@ -249,4 +251,77 @@ test('disconnect with the tab closed forgets the session and sends no request', 
   assert.equal(t.store.has(SESSION_KEY), false);
   assert.equal(t.log.requests.length, 0);
   assert.equal(t.bar.text, 'cc: not connected');
+});
+
+const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r; }); return { promise, resolve }; };
+const settle = () => new Promise((r) => setImmediate(r));
+
+test('a close during connect\'s listConductors leaves the bar closed with no message and no document', async () => {
+  const gate = deferred();
+  const t = setup({ stored: 's1', pick: (i) => i[0], handlers: { listConductors: () => gate.promise } });
+  const done = t.conn.connect();
+  await settle();
+  t.tab.open = false;
+  t.conn.onClosed();
+  gate.resolve({ ok: false, code: 'REQUEST_FAILED', error: 'closed' });
+  await done;
+  assert.equal(t.bar.text, 'cc: tab closed');
+  assert.equal(t.log.messages.length, 0);
+  assert.equal(t.log.picks.length, 0);
+});
+
+test('a close during connect\'s newConductor shows no error and stores nothing', async () => {
+  const gate = deferred();
+  const t = setup({ conductors: [], pick: (i) => i[0], handlers: { newConductor: () => gate.promise } });
+  const done = t.conn.connect();
+  await settle();
+  t.tab.open = false;
+  t.conn.onClosed();
+  gate.resolve({ ok: false, code: 'REQUEST_FAILED', error: 'closed' });
+  await done;
+  assert.equal(t.log.messages.length, 0);
+  assert.equal(t.store.has(SESSION_KEY), false);
+});
+
+test('a close during resume\'s label lookup leaves sync disabled and the bar closed', async () => {
+  const gate = deferred();
+  const t = setup({ stored: 's1', handlers: { listConductors: () => gate.promise } });
+  const done = t.conn.resume();
+  await settle();
+  t.tab.open = false;
+  t.conn.onClosed();
+  gate.resolve({ ok: true, value: live });
+  await done;
+  assert.equal(t.bar.text, 'cc: tab closed');
+  assert.ok(!t.log.sync.includes('enable'));
+  assert.ok(!t.log.sync.includes('pushNow'));
+  assert.equal(t.log.sync.at(-1), 'disable');
+});
+
+test('a close during endpoints leaves no rejection from resume or connect', async () => {
+  for (const run of ['resume', 'connect']) {
+    const gate = deferred();
+    const t = setup({ stored: 's1', conductors: live, pick: (i) => i[0], externalGate: gate.promise });
+    const done = t.conn[run]();
+    await settle();
+    t.tab.open = false;
+    t.conn.onClosed();
+    gate.resolve();
+    await done;
+    assert.equal(t.log.view.some((v) => v[0] === 'load'), false, run);
+    assert.equal(t.bar.text, 'cc: tab closed', run);
+  }
+});
+
+test('a close during connect\'s session store leaves no rejection and no document', async () => {
+  const gate = deferred();
+  const t = setup({ conductors: live, pick: (i) => i[0], updateGate: gate.promise });
+  const done = t.conn.connect();
+  await settle(); await settle();
+  t.tab.open = false;
+  t.conn.onClosed();
+  gate.resolve();
+  await done;
+  assert.equal(t.log.view.some((v) => v[0] === 'document'), false);
+  assert.ok(!t.log.sync.includes('enable'));
 });

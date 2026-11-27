@@ -30,6 +30,8 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
   let state = null;
   let busy = false;
   let connectedLabel = null;
+  // Bumped when the tab closes; a connect/resume that started earlier abandons its remaining steps.
+  let closeGeneration = 0;
 
   function setState(next) {
     const changed = !state || state.kind !== next.kind || state.code !== next.code || state.label !== next.label;
@@ -92,11 +94,15 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
     busy = true;
     try {
       view.reveal();
+      const gen = closeGeneration;
+      const stale = () => gen !== closeGeneration;
       const ep = await endpoints();
+      if (stale()) return;
       view.load({ ccOrigin: ep.ccOrigin, relayUrl: ep.relayUrl });
-      if (!(await relayReady(ep))) return;
+      if (!(await relayReady(ep)) || stale()) return;
 
       const list = await view.request({ op: 'listConductors' });
+      if (stale()) return;
       if (!list.ok) {
         vscode.window.showErrorMessage(`cc: could not list conductors (${list.code}: ${list.error ?? ''}).`);
         return;
@@ -106,12 +112,13 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
         { label: NEW_CONDUCTOR_LABEL, isNew: true },
       ];
       const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Choose the conductor to show' });
-      if (!pick || !view.isOpen()) return;
+      if (!pick || stale()) return;
 
       let sid = pick.sessionId;
       let label = pick.label;
       if (pick.isNew) {
         const made = await view.request({ op: 'newConductor' });
+        if (stale()) return;
         if (!made.ok) {
           vscode.window.showErrorMessage(`cc: could not start a conductor (${made.code}: ${made.error ?? ''}).`);
           return;
@@ -120,6 +127,7 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
         label = 'New conductor';
       }
       await workspaceState.update(SESSION_KEY, sid);
+      if (stale()) return;
       view.setDocument(ep.documentUrl(sid));
       showConnected(label);
     } finally { busy = false; }
@@ -135,10 +143,15 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
     if (busy) return;
     busy = true;
     try {
+      const gen = closeGeneration;
+      const stale = () => gen !== closeGeneration;
       const ep = await endpoints();
+      if (stale()) return;
       view.load({ ccOrigin: ep.ccOrigin, relayUrl: ep.relayUrl, documentUrl: ep.documentUrl(sid) });
-      if (!(await relayReady(ep))) return;
-      showConnected(await labelOf(sid));
+      if (!(await relayReady(ep)) || stale()) return;
+      const label = await labelOf(sid);
+      if (stale()) return;
+      showConnected(label);
     } finally { busy = false; }
   }
 
@@ -197,6 +210,7 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
 
   /** The tab closed: syncing stops, the stored session stays for the next open. */
   function onClosed() {
+    closeGeneration += 1;
     sync.disable();
     setState(workspaceState.get(SESSION_KEY) ? { kind: 'closed' } : { kind: 'not-connected' });
   }
