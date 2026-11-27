@@ -407,6 +407,9 @@ test('a visible tab whose write failed is retried only by a real hidden-to-visib
   p.setVisible(true);
   await settle();
   assert.equal(t.writes('s2').length, 1);
+  p.setVisible(false); // hiding alone writes nothing
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
   hideShow(p);
   await settle();
   assert.equal(t.writes('s2').length, 2);
