@@ -392,3 +392,22 @@ test('a catch-up file chip respects the tab\'s file dedupe', async () => {
   await settle();
   assert.equal(t.writes('s2').length, 1);
 });
+
+test('a visible tab whose write failed is retried only by a real hidden-to-visible transition', async () => {
+  let failed = 0;
+  const t = setup({ relay: (m) => (m.op === 'setChip' && m.sid === 's2' && failed++ === 0 ? { ok: false, code: 'REQUEST_FAILED', error: 'x' } : null) });
+  await openTwo(t);
+  t.tabs.onChip(chip); // s2's write fails and forgets the seq
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
+  t.source.shown = chip;
+  const p = t.fake.panels[1];
+  p.setActive(false);
+  p.setActive(true);
+  p.setVisible(true);
+  await settle();
+  assert.equal(t.writes('s2').length, 1);
+  hideShow(p);
+  await settle();
+  assert.equal(t.writes('s2').length, 2);
+});

@@ -153,3 +153,11 @@ test('disable forgets the received seq', async () => {
   t.writer.disable(); t.writer.enable();
   assert.equal(t.writer.has(1), false);
 });
+
+test('an offer while disabled records nothing, so the tab is still caught up later', async () => {
+  const t = setup();
+  t.writer.disable();
+  t.writer.offer(seqd(sel(1), 1));
+  t.writer.enable();
+  assert.equal(t.writer.has(1), false);
+});
