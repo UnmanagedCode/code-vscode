@@ -3,7 +3,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRelay } from '../plugin/relayCore.mjs';
+import { createRequire } from 'node:module';
 import { FRAME_ANCESTOR_SOURCES } from '../plugin/embed.mjs';
+
+const { shapeChip } = createRequire(import.meta.url)('../extension/src/chipShape.js');
 
 const enabled = process.env.RUN_REAL_CC === '1' && !!process.env.CC_URL;
 const skip = enabled ? false : 'set RUN_REAL_CC=1 and CC_URL to run against a scratch cc';
@@ -42,6 +45,14 @@ test('the relay starts a conductor, sets and clears its chip', { skip }, async (
 
   const set = await call('setChip', { sid, title: 'smoke.ts:1', data: 'path: smoke.ts' });
   assert.equal(set.ok, true, JSON.stringify(set));
+  // A path-only file chip, as the extension writes for an empty selection in a file.
+  const file = shapeChip({
+    fileName: '/work/smoke.ts', path: '/work/smoke.ts', languageId: 'typescript', scheme: 'file', isClosed: false,
+    selection: { start: { line: 4, character: 2 }, end: { line: 4, character: 2 } }, text: '',
+  });
+  assert.equal(file.kind, 'file');
+  const setFile = await call('setChip', { sid, title: file.title, data: file.data });
+  assert.equal(setFile.ok, true, JSON.stringify(setFile));
   const clear = await call('clearChip', { sid });
   assert.equal(clear.ok, true, JSON.stringify(clear));
 

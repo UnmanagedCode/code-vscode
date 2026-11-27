@@ -1,7 +1,7 @@
 'use strict';
-// The cc panel view: the webview's HTML and CSP, and message routing between the extension and the webview.
+// The cc editor tab: the webview's HTML and CSP, and message routing between the extension and the webview.
 
-const VIEW_ID = 'codeConductor.session';
+const VIEW_TYPE = 'codeConductor.session';
 // Above the relay's own 10 s request timeout, so the relay's answer wins when it can.
 const REQUEST_TIMEOUT_MS = 12_000;
 
@@ -34,16 +34,17 @@ function newNonce(randomBytes) {
   return randomBytes(16).toString('hex');
 }
 
-/** deps: {vscode, extensionUri, randomBytes(n), setTimeout/clearTimeout via globals} */
+/** deps: {vscode, extensionUri, randomBytes(n)}. Holds at most one WebviewPanel. */
 function createView({ vscode, extensionUri, randomBytes }) {
-  let webviewView = null;
-  let resolvedWaiters = [];
+  let panel = null;
   let ready = false;
   let readyWaiters = [];
   const pending = new Map();
   let nextReq = 1;
-  const listeners = { resolve: [], ready: [], connect: [] };
+  const listeners = { resolve: [], ready: [], connect: [], close: [] };
   const emit = (name) => { for (const fn of listeners[name]) fn(); };
+  const mediaRoot = () => vscode.Uri.joinPath(extensionUri, 'media');
+  const notOpen = () => ({ ok: false, code: 'REQUEST_FAILED', error: 'the cc tab is not open' });
 
   function onMessage(msg) {
     if (msg?.type === 'relayReady') {
@@ -61,13 +62,13 @@ function createView({ vscode, extensionUri, randomBytes }) {
 
   function resetChannel() {
     ready = false;
-    for (const [id, entry] of pending) { clearTimeout(entry.timer); entry.resolve({ ok: false, code: 'REQUEST_FAILED', error: 'the panel reloaded' }); pending.delete(id); }
+    for (const [id, entry] of pending) { clearTimeout(entry.timer); entry.resolve({ ok: false, code: 'REQUEST_FAILED', error: 'the cc tab reloaded or closed' }); pending.delete(id); }
   }
 
   function render(args) {
-    if (!webviewView) throw new Error('the cc view has not been resolved');
+    if (!panel) throw new Error('the cc tab is not open');
     resetChannel();
-    const { webview } = webviewView;
+    const { webview } = panel;
     webview.html = renderHtml({
       nonce: newNonce(randomBytes),
       cspSource: webview.cspSource,
@@ -76,53 +77,69 @@ function createView({ vscode, extensionUri, randomBytes }) {
     });
   }
 
+  /** Takes over a new or restored panel. */
+  function adopt(p) {
+    panel = p;
+    p.title = 'cc';
+    p.iconPath = { light: vscode.Uri.joinPath(extensionUri, 'media', 'icon-light.svg'), dark: vscode.Uri.joinPath(extensionUri, 'media', 'icon-dark.svg') };
+    p.webview.options = { enableScripts: true, localResourceRoots: [mediaRoot()] };
+    p.webview.onDidReceiveMessage(onMessage);
+    p.onDidDispose(() => {
+      panel = null;
+      resetChannel();
+      for (const w of readyWaiters) w.reject(new Error('the cc tab closed'));
+      readyWaiters = [];
+      emit('close');
+    });
+    emit('resolve');
+  }
+
   return {
-    /** The provider to register for VIEW_ID. */
-    provider: {
-      resolveWebviewView(view) {
-        webviewView = view;
-        view.webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.joinPath(extensionUri, 'media')] };
-        view.webview.onDidReceiveMessage(onMessage);
-        view.onDidDispose(() => { webviewView = null; resetChannel(); });
-        for (const w of resolvedWaiters) w();
-        resolvedWaiters = [];
-        emit('resolve');
-      },
+    /** Registered for VIEW_TYPE so a window reload restores the tab. */
+    serializer: {
+      async deserializeWebviewPanel(restored) { if (panel) restored.dispose(); else adopt(restored); },
     },
     on(name, fn) { listeners[name].push(fn); },
-    /** Shows the view, resolving the webview if it never was. */
-    async reveal() {
-      if (webviewView) { webviewView.show?.(true); return; }
-      const resolved = new Promise((resolve) => resolvedWaiters.push(resolve));
-      await vscode.commands.executeCommand(`${VIEW_ID}.focus`);
-      await resolved;
+    isOpen() { return panel !== null; },
+    /** Shows the tab, beside the current editor when it has to be created. */
+    reveal() {
+      if (panel) { panel.reveal(); return; }
+      adopt(vscode.window.createWebviewPanel(
+        VIEW_TYPE,
+        'cc',
+        { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false },
+        { enableScripts: true, localResourceRoots: [mediaRoot()], retainContextWhenHidden: true },
+      ));
     },
     /** Loads the relay (and cc, when `documentUrl` is given) for `ccOrigin`. */
     load({ ccOrigin, relayUrl, documentUrl = null }) { render({ ccOrigin, relayUrl, documentUrl }); },
-    /** Shows text with a Connect button and no frames. A view not yet resolved shows it when it resolves (connection.resume). */
-    showMessage(message) { if (webviewView) render({ message }); },
+    /** Shows text with a Connect button and no frames; a closed tab shows it when it is next opened (connection.resume). */
+    showMessage(message) { if (panel) render({ message }); },
     /** Points the cc frame at `url`; the relay frame must already be loaded for the same origin. */
-    setDocument(url) { webviewView.webview.postMessage({ type: 'showDocument', url }); },
-    /** Resolves once the relay frame reports ready; rejects after `ms`. */
+    setDocument(url) {
+      if (!panel) throw new Error('the cc tab is not open');
+      panel.webview.postMessage({ type: 'showDocument', url });
+    },
+    /** Resolves once the relay frame reports ready; rejects after `ms` or when the tab closes. */
     whenReady(ms) {
       if (ready) return Promise.resolve();
       return new Promise((resolve, reject) => {
-        const waiter = { resolve: () => { clearTimeout(timer); resolve(); } };
+        const waiter = { resolve: () => { clearTimeout(timer); resolve(); }, reject: (e) => { clearTimeout(timer); reject(e); } };
         const timer = setTimeout(() => { readyWaiters = readyWaiters.filter((w) => w !== waiter); reject(new Error('relay not ready')); }, ms);
         readyWaiters.push(waiter);
       });
     },
     /** One relay request; always resolves to {ok, ...}. */
     request(msg) {
-      if (!webviewView) return Promise.resolve({ ok: false, code: 'REQUEST_FAILED', error: 'the cc view is not open' });
+      if (!panel) return Promise.resolve(notOpen());
       const reqId = String(nextReq++);
       return new Promise((resolve) => {
         const timer = setTimeout(() => { pending.delete(reqId); resolve({ ok: false, code: 'REQUEST_FAILED', error: 'the relay did not answer' }); }, REQUEST_TIMEOUT_MS);
         pending.set(reqId, { resolve, timer });
-        webviewView.webview.postMessage({ type: 'relayRequest', msg: { ...msg, reqId } });
+        panel.webview.postMessage({ type: 'relayRequest', msg: { ...msg, reqId } });
       });
     },
   };
 }
 
-module.exports = { VIEW_ID, REQUEST_TIMEOUT_MS, renderHtml, createView };
+module.exports = { VIEW_TYPE, REQUEST_TIMEOUT_MS, renderHtml, createView };
