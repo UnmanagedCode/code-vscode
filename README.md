@@ -14,7 +14,7 @@ Details: [docs/features.md](docs/features.md).
 ## Quick start
 
 1. **Plugin.** Put this repo in cc's projects root (`PROJECTS_ROOT`) as a project or clone. In cc: Settings → Plugins → Rescan → Enable `code-vscode`. Its backend starts lazily on the tab's first request.
-2. **Extension.** `cd extension && npm ci && npm run package` builds `code-vscode-<version>.vsix`. Install with `code --install-extension <file>.vsix` or Extensions → "Install from VSIX…".
+2. **Extension.** `make install` builds `extension/code-vscode-<version>.vsix` and installs it with the `code` CLI. Without `code` on PATH, run `make package` and use Extensions → "Install from VSIX…".
 3. Set `codeConductor.serverUrl` (default `http://127.0.0.1:8787`, cc's standard local URL) to cc as seen from the machine the extension runs on.
 4. Run **cc: Connect** (or click the editor-title button).
 
@@ -36,6 +36,15 @@ Details: [docs/features.md](docs/features.md).
 
 ## Development
 
-- `npm test` — all suites (`node:test`, no dependencies).
+Run from the repo root; needs `make`, node and npm.
+
+| Target | Does |
+|---|---|
+| `make` | `test`, then `package` |
+| `make test` | `npm test`: every suite (`node:test`, no dependencies) |
+| `make package` | `npm ci` in `extension/` when its lockfile changed or deps are missing, then `npm run package` → `extension/code-vscode-<version>.vsix` |
+| `make install` | `package`, then `code --install-extension` on that `.vsix`; fails with a message if `code` isn't on PATH |
+| `make clean` | removes the built `extension/code-vscode-*.vsix` files |
+
 - `RUN_REAL_CC=1 CC_URL=http://127.0.0.1:<port> npm test` — adds the smoke test against a scratch cc (`npm run start:isolated` in a cc checkout) with the plugin enabled. Never point it at a cc you use.
 - Internals: [docs/architecture.md](docs/architecture.md); contracts: [docs/protocol.md](docs/protocol.md).
