@@ -2,7 +2,7 @@
 // Wiring only: builds the collaborators and registers them once.
 const vscode = require('vscode');
 const { randomBytes } = require('node:crypto');
-const { createView, VIEW_ID } = require('./view');
+const { createView, VIEW_TYPE } = require('./view');
 const { createChipSync } = require('./chipSync');
 const { createConnection } = require('./connection');
 const { shapeEditor } = require('./chipShape');
@@ -27,12 +27,17 @@ function activate(context) {
     sync,
   });
 
+  // Before the serializer is registered, so a restored tab's resume() wins.
+  connection.init();
+
   view.on('resolve', () => { void connection.resume(); });
+  view.on('close', () => connection.onClosed());
   view.on('ready', () => connection.onRelayReady());
   view.on('connect', () => { void connection.connect(); });
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(VIEW_ID, view.provider, { webviewOptions: { retainContextWhenHidden: true } }),
+    vscode.window.registerWebviewPanelSerializer(VIEW_TYPE, view.serializer),
+    vscode.commands.registerCommand('codeConductor.open', () => connection.open()),
     vscode.commands.registerCommand('codeConductor.connect', () => connection.connect()),
     vscode.commands.registerCommand('codeConductor.disconnect', () => connection.disconnect()),
     { dispose: () => { sync.dispose(); connection.dispose(); } },

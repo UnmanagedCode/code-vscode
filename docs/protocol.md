@@ -31,13 +31,14 @@ Request `{reqId, op, ...args}`; response `{type: 'result', reqId, ok: true, valu
 
 - View-only gate: chip ops answer `VIEW_ONLY` without writing when `uiMode === 'view'`, or `'interact'` and `focusSessionId !== sid` (cc's `sessionViewOnly`, `shared/viewOnly.ts`). The gate's only health read is the one at load, so a gated op makes at most one cc call (none when the gate refuses it) and its worst case, the relay's 10 s timeout, stays below the extension's 12 s request timeout. The `health` op itself does a fresh `GET api/health` each time.
 - Codes: cc's pass through (`SESSION_NOT_LIVE`, `INVALID_ARGUMENT`); the relay adds `VIEW_ONLY`, `REQUEST_FAILED` (network error or 10 s timeout) and `HOST_ERROR` (non-2xx with no `code`, or a conductor started without a session id).
+- A file chip (empty selection in a file) is ordinary `setChip` data (path and language only); there is no separate op.
 - Chip limits (title 200 characters, data 256 KiB) are cc's `CHIP_TITLE_MAX` / `CHIP_DATA_MAX` in `src/contextChip.ts`, duplicated in `extension/src/chipShape.js`.
 
 ## What reaps a new conductor
 
 - A pristine conductor (before its first prompt) is unlisted in `GET /api/instances` and kept alive only by websocket viewers (`pristine_view`), tracked by cc's `PristineTracker` (`src/pristine.ts`).
 - With no viewer it is abandoned: at once on `pristine_leave`, after `PRISTINE_REAP_GRACE_MS` (60 s) after a socket close or when nothing ever viewed it. Abandoned with a blank draft it is reaped.
-- The panel's embedded cc under `?focus=<sid>` registers as a viewer, so showing the conductor right after `newConductor` keeps it; chip writes have no effect on reaping.
+- The tab's embedded cc under `?focus=<sid>` registers as a viewer, so showing the conductor right after `newConductor` keeps it; chip writes have no effect on reaping.
 - Consequence: absence from `listConductors` never means ended; only `SESSION_NOT_LIVE` does.
 
 ## Webview ↔ extension messages (`extension/media/webview.js`, `extension/src/view.js`)

@@ -1,24 +1,40 @@
 {
   "name": "code-vscode",
   "displayName": "Code Conductor",
-  "description": "Shows one cc conductor session in a VS Code panel and turns the editor selection into its context chip.",
+  "description": "Shows one cc conductor session in a VS Code editor tab and turns the editor selection, or the active file, into its context chip.",
   "version": "0.1.0",
   "publisher": "code-conductor",
   "license": "UNLICENSED",
   "private": true,
-  "engines": { "vscode": "^1.80.0" },
-  "categories": ["Other"],
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
   "main": "./src/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onWebviewPanel:codeConductor.session"
+  ],
   "contributes": {
-    "viewsContainers": {
-      "panel": [{ "id": "codeConductor", "title": "cc", "icon": "media/icon.svg" }]
-    },
-    "views": {
-      "codeConductor": [{ "id": "codeConductor.session", "name": "cc", "type": "webview" }]
-    },
     "commands": [
-      { "command": "codeConductor.connect", "title": "cc: Connect" },
-      { "command": "codeConductor.disconnect", "title": "cc: Disconnect" }
+      {
+        "command": "codeConductor.open",
+        "title": "cc: Open",
+        "icon": {
+          "light": "media/icon-light.svg",
+          "dark": "media/icon-dark.svg"
+        }
+      },
+      {
+        "command": "codeConductor.connect",
+        "title": "cc: Connect"
+      },
+      {
+        "command": "codeConductor.disconnect",
+        "title": "cc: Disconnect"
+      }
     ],
     "configuration": {
       "title": "Code Conductor",
@@ -29,6 +45,15 @@
           "markdownDescription": "The cc URL as seen from the machine the extension runs on (the remote host in a VS Code Remote window). The code-vscode plugin must be enabled in that cc."
         }
       }
+    },
+    "menus": {
+      "editor/title": [
+        {
+          "command": "codeConductor.open",
+          "group": "navigation",
+          "when": "activeEditor == workbench.editors.files.textFileEditor || activeEditor == workbench.editors.textResourceEditor"
+        }
+      ]
     }
   },
   "scripts": {

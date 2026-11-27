@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "cc plugin and VS Code extension that show one conductor session in a VS Code panel",
+  "description": "cc plugin and VS Code extension that show one conductor session in a VS Code editor tab",
   "scripts": {
     "test": "node --test"
   }

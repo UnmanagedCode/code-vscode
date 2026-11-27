@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const { createConnection, SESSION_KEY } = createRequire(import.meta.url)('../extension/src/connection.js');
 
-function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stored, conductors = [], pick, readyFails = false, handlers = {} } = {}) {
+function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stored, conductors = [], pick, readyFails = false, handlers = {}, open = true } = {}) {
   const store = new Map(stored ? [[SESSION_KEY, stored]] : []);
   const log = { view: [], sync: [], messages: [], requests: [], picks: [] };
   const bar = { text: '', show() {}, dispose() {} };
@@ -18,8 +18,10 @@ function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stor
     env: { asExternalUri: async (uri) => ({ toString: () => external, uri }) },
     Uri: { parse: (s) => s },
   };
+  const tab = { open };
   const view = {
-    reveal: async () => log.view.push(['reveal']),
+    isOpen: () => tab.open,
+    reveal: () => { tab.open = true; log.view.push(['reveal']); },
     load: (a) => log.view.push(['load', a]),
     showMessage: (t) => log.view.push(['message', t]),
     setDocument: (u) => log.view.push(['document', u]),
@@ -35,7 +37,7 @@ function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stor
   const sync = { enable: () => log.sync.push('enable'), disable: () => log.sync.push('disable'), pushNow: () => log.sync.push('pushNow') };
   const workspaceState = { get: (k) => store.get(k), update: async (k, v) => { if (v === undefined) store.delete(k); else store.set(k, v); } };
   const conn = createConnection({ vscode, workspaceState, getServerUrl: () => serverUrl, view, sync });
-  return { conn, log, store, bar };
+  return { conn, log, store, bar, tab };
 }
 
 const live = [{ sessionId: 's1', displayLabel: 'Refactor auth', status: 'idle' }, { sessionId: 's2', displayLabel: 'Fix build', status: 'busy' }];
@@ -174,4 +176,77 @@ test('a relay (re)load while connected pushes the current chip; while not connec
   off.log.sync.length = 0;
   off.conn.onRelayReady();
   assert.deepEqual(off.log.sync, []);
+});
+
+test('init shows the tab as closed when a session is stored, not connected otherwise', () => {
+  const stored = setup({ stored: 's1' });
+  stored.conn.init();
+  assert.equal(stored.bar.text, 'cc: tab closed');
+  const none = setup();
+  none.conn.init();
+  assert.equal(none.bar.text, 'cc: not connected');
+});
+
+test('the status bar item opens the tab', () => {
+  const t = setup();
+  assert.equal(t.bar.command, 'codeConductor.open');
+});
+
+test('open with a stored session reveals the tab with no picker and no new conductor', async () => {
+  const t = setup({ stored: 's1', conductors: live, open: false });
+  await t.conn.open();
+  assert.deepEqual(t.log.view, [['reveal']]);
+  assert.equal(t.log.picks.length, 0);
+  assert.ok(!t.log.requests.some((r) => r.op === 'newConductor'));
+});
+
+test('open with no stored session runs the picker', async () => {
+  const t = setup({ conductors: live, pick: (i) => i[0] });
+  await t.conn.open();
+  assert.equal(t.log.picks.length, 1);
+  assert.equal(t.store.get(SESSION_KEY), 's1');
+});
+
+test('closing the tab while connected stops syncing, keeps the session, and later failed chip results change nothing', async () => {
+  const t = setup({ stored: 's1', conductors: live });
+  await t.conn.resume();
+  const before = t.log.messages.length;
+  t.tab.open = false;
+  t.conn.onClosed();
+  assert.equal(t.log.sync.at(-1), 'disable');
+  assert.equal(t.store.get(SESSION_KEY), 's1');
+  assert.equal(t.bar.text, 'cc: tab closed');
+  await t.conn.onChipResult({ ok: false, code: 'REQUEST_FAILED' });
+  assert.equal(t.bar.text, 'cc: tab closed');
+  assert.equal(t.log.messages.length, before);
+});
+
+test('reopening after a close reconnects to the stored session without a picker and pushes the chip', async () => {
+  const t = setup({ stored: 's2', conductors: live });
+  await t.conn.resume();
+  t.conn.onClosed();
+  t.log.view.length = 0;
+  t.log.sync.length = 0;
+  await t.conn.resume();
+  assert.equal(t.log.picks.length, 0);
+  assert.equal(t.log.view.find((v) => v[0] === 'load')[1].documentUrl, 'http://127.0.0.1:8787/plugins/code-vscode/?focus=s2');
+  assert.equal(t.log.sync.at(-1), 'pushNow');
+  assert.equal(t.bar.text, 'cc: Fix build');
+});
+
+test('a relay timeout after the tab closed mid-connect shows no error', async () => {
+  const t = setup({ readyFails: true, conductors: live, pick: (i) => i[0], open: false });
+  const done = t.conn.connect();
+  t.tab.open = false;
+  await done;
+  assert.equal(t.log.messages.length, 0);
+  assert.notEqual(t.bar.text, 'cc: RELAY_TIMEOUT');
+});
+
+test('disconnect with the tab closed forgets the session and sends no request', async () => {
+  const t = setup({ stored: 's1', open: false });
+  await t.conn.disconnect();
+  assert.equal(t.store.has(SESSION_KEY), false);
+  assert.equal(t.log.requests.length, 0);
+  assert.equal(t.bar.text, 'cc: not connected');
 });

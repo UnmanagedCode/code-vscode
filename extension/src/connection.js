@@ -1,5 +1,5 @@
 'use strict';
-// Which conductor session the panel shows: choosing, persisting and reconnecting it, and the status bar.
+// Which conductor session the tab shows: choosing, persisting and reconnecting it, and the status bar.
 
 const SESSION_KEY = 'codeConductor.sessionId';
 const PLUGIN_PATH = 'plugins/code-vscode/';
@@ -9,6 +9,7 @@ const NEW_CONDUCTOR_LABEL = '$(add) New conductor';
 const STATUS_TEXT = {
   connected: (s) => `cc: ${s.label}`,
   'not-connected': () => 'cc: not connected',
+  closed: () => 'cc: tab closed',
   'view-only': () => 'cc: view-only (no chip)',
   ended: () => 'cc: session ended',
   error: (s) => `cc: ${s.code}`,
@@ -20,11 +21,12 @@ const STATUS_TEXT = {
  *            createStatusBarItem, env.asExternalUri, Uri.parse
  *   workspaceState — get/update, one per window and workspace
  *   getServerUrl() — the codeConductor.serverUrl setting
- *   view — reveal, load, showMessage, setDocument, whenReady, request
+ *   view — isOpen, reveal, load, showMessage, setDocument, whenReady, request
  *   sync — chipSync's enable, disable, pushNow
  */
 function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) {
   const bar = vscode.window.createStatusBarItem();
+  bar.command = 'codeConductor.open';
   let state = null;
   let busy = false;
   let connectedLabel = null;
@@ -60,9 +62,11 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
       await view.whenReady(RELAY_READY_TIMEOUT_MS);
       return true;
     } catch {
-      notRunning({ kind: 'error', code: 'RELAY_TIMEOUT' }, 'cc is not reachable from the panel.');
+      // A tab closed mid-connect is the user's doing, not an unreachable cc.
+      if (!view.isOpen()) return false;
+      notRunning({ kind: 'error', code: 'RELAY_TIMEOUT' }, 'cc is not reachable from the tab.');
       vscode.window.showErrorMessage(
-        `cc: the panel could not reach ${ep.serverUrl}. Check that cc is running there, that the code-vscode plugin is enabled in cc (Settings → Plugins; a disabled plugin answers 404), `
+        `cc: the cc tab could not reach ${ep.serverUrl}. Check that cc is running there, that the code-vscode plugin is enabled in cc (Settings → Plugins; a disabled plugin answers 404), `
         + 'that the URL is not plain http on a non-loopback address (blocked as mixed content), and that it needs no login.',
       );
       return false;
@@ -87,7 +91,7 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
     if (busy) return;
     busy = true;
     try {
-      await view.reveal();
+      view.reveal();
       const ep = await endpoints();
       view.load({ ccOrigin: ep.ccOrigin, relayUrl: ep.relayUrl });
       if (!(await relayReady(ep))) return;
@@ -102,7 +106,7 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
         { label: NEW_CONDUCTOR_LABEL, isNew: true },
       ];
       const pick = await vscode.window.showQuickPick(items, { placeHolder: 'Choose the conductor to show' });
-      if (!pick) return;
+      if (!pick || !view.isOpen()) return;
 
       let sid = pick.sessionId;
       let label = pick.label;
@@ -121,7 +125,7 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
     } finally { busy = false; }
   }
 
-  /** The view resolved: reconnect to the stored session, or show the not-connected page. */
+  /** The tab opened (new or restored): reconnect to the stored session, or show the not-connected page. */
   async function resume() {
     const sid = workspaceState.get(SESSION_KEY);
     if (!sid) {
@@ -146,7 +150,8 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
   async function disconnect() {
     const sid = workspaceState.get(SESSION_KEY);
     sync.disable();
-    if (sid) await view.request({ op: 'clearChip', sid });
+    // With the tab closed there is no relay to clear the chip through.
+    if (sid && view.isOpen()) await view.request({ op: 'clearChip', sid });
     await workspaceState.update(SESSION_KEY, undefined);
     notRunning({ kind: 'not-connected' }, 'Not connected to a cc session.');
   }
@@ -166,7 +171,7 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
   /** One chip write's outcome; the status bar and notifications change only on a state change. */
   async function onChipResult(result) {
     if (!state) return;
-    if (state?.kind === 'ended' || state?.kind === 'not-connected') return;
+    if (state.kind === 'ended' || state.kind === 'not-connected' || state.kind === 'closed') return;
     if (result.ok) {
       if (state.kind !== 'connected') setState({ kind: 'connected', label: connectedLabel });
       return;
@@ -179,7 +184,24 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
     if (setState({ kind: 'error', code: result.code })) vscode.window.showWarningMessage(`cc: chip update failed (${result.code}${result.error ? `: ${result.error}` : ''}).`);
   }
 
-  return { connect, disconnect, resume, onRelayReady, sendChip, onChipResult, dispose() { bar.dispose(); } };
+  /** Window start: the bar shows the stored session's tab as closed, or not connected. */
+  function init() {
+    setState(workspaceState.get(SESSION_KEY) ? { kind: 'closed' } : { kind: 'not-connected' });
+  }
+
+  /** The command and status bar entry: reopen the stored session's tab, or choose one. */
+  async function open() {
+    if (workspaceState.get(SESSION_KEY)) view.reveal();
+    else await connect();
+  }
+
+  /** The tab closed: syncing stops, the stored session stays for the next open. */
+  function onClosed() {
+    sync.disable();
+    setState(workspaceState.get(SESSION_KEY) ? { kind: 'closed' } : { kind: 'not-connected' });
+  }
+
+  return { init, open, onClosed, connect, disconnect, resume, onRelayReady, sendChip, onChipResult, dispose() { bar.dispose(); } };
 }
 
 module.exports = { SESSION_KEY, RELAY_READY_TIMEOUT_MS, createConnection };
