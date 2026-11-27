@@ -104,6 +104,8 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
     busy = true;
     try {
       view.reveal();
+      // A new panel's own resolve (resume) was refused as busy; connect is about to load it, so it needs no retry.
+      resumeQueued = false;
       const gen = closeGeneration;
       const stale = () => gen !== closeGeneration;
       const ep = await endpoints();

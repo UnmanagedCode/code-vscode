@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const { createConnection, SESSION_KEY } = createRequire(import.meta.url)('../extension/src/connection.js');
 
-function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stored, conductors = [], pick, readyFails = false, handlers = {}, open = true, externalGate = null, updateGate = null } = {}) {
+function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stored, conductors = [], pick, readyFails = false, handlers = {}, open = true, externalGate = null, updateGate = null, wireResolve = false } = {}) {
   const store = new Map(stored ? [[SESSION_KEY, stored]] : []);
   const log = { view: [], sync: [], messages: [], requests: [], picks: [] };
   const bar = { text: '', show() {}, dispose() {} };
@@ -21,7 +21,13 @@ function setup({ serverUrl = 'http://127.0.0.1:8787', external = serverUrl, stor
   const tab = { open };
   const view = {
     isOpen: () => tab.open,
-    reveal: () => { tab.open = true; log.view.push(['reveal']); },
+    // As in extension.js, adopting a new panel emits `resolve` into resume().
+    reveal: () => {
+      const created = !tab.open;
+      tab.open = true;
+      log.view.push(['reveal']);
+      if (created && wireResolve) void conn.resume();
+    },
     // Like the real view, which throws without a panel.
     load: (a) => { if (!tab.open) throw new Error('the cc tab is not open'); log.view.push(['load', a]); },
     showMessage: (t) => log.view.push(['message', t]),
@@ -343,4 +349,14 @@ test('a reopen that arrives while a connect is still running is retried once tha
   assert.equal(t.log.view.filter((v) => v[0] === 'load').at(-1)[1].documentUrl, 'http://127.0.0.1:8787/plugins/code-vscode/?focus=s1');
   assert.equal(t.bar.text, 'cc: Refactor auth');
   assert.equal(t.store.get(SESSION_KEY), 's1');
+});
+
+test('connect opening the panel itself ignores the resolve its own reveal emits', async () => {
+  const t = setup({ stored: 's1', open: false, wireResolve: true, conductors: live, pick: (items) => items[1] });
+  await t.conn.connect();
+  await settle(); await settle();
+  assert.equal(t.log.view.filter((v) => v[0] === 'load').length, 1);
+  assert.equal(t.log.sync.filter((e) => e === 'enable').length, 1);
+  assert.equal(t.bar.text, 'cc: Fix build');
+  assert.equal(t.store.get(SESSION_KEY), 's2');
 });
