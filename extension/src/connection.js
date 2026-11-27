@@ -32,6 +32,8 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
   let connectedLabel = null;
   // Bumped when the tab closes; a connect/resume that started earlier abandons its remaining steps.
   let closeGeneration = 0;
+  // A reopen (resume) that arrived while a connect/resume was still running; retried when it ends.
+  let resumeQueued = false;
 
   function setState(next) {
     const changed = !state || state.kind !== next.kind || state.code !== next.code || state.label !== next.label;
@@ -89,6 +91,14 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
     sync.pushNow();
   }
 
+  function endBusy() {
+    busy = false;
+    if (resumeQueued) {
+      resumeQueued = false;
+      if (view.isOpen()) void resume();
+    }
+  }
+
   async function connect() {
     if (busy) return;
     busy = true;
@@ -130,7 +140,7 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
       if (stale()) return;
       view.setDocument(ep.documentUrl(sid));
       showConnected(label);
-    } finally { busy = false; }
+    } finally { endBusy(); }
   }
 
   /** The tab opened (new or restored): reconnect to the stored session, or show the not-connected page. */
@@ -140,7 +150,7 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
       notRunning({ kind: 'not-connected' }, 'Not connected to a cc session.');
       return;
     }
-    if (busy) return;
+    if (busy) { resumeQueued = true; return; }
     busy = true;
     try {
       const gen = closeGeneration;
@@ -152,7 +162,7 @@ function createConnection({ vscode, workspaceState, getServerUrl, view, sync }) 
       const label = await labelOf(sid);
       if (stale()) return;
       showConnected(label);
-    } finally { busy = false; }
+    } finally { endBusy(); }
   }
 
   async function ended() {

@@ -325,3 +325,22 @@ test('a close during connect\'s session store leaves no rejection and no documen
   assert.equal(t.log.view.some((v) => v[0] === 'document'), false);
   assert.ok(!t.log.sync.includes('enable'));
 });
+
+test('a reopen that arrives while a connect is still running is retried once that connect abandons', async () => {
+  const picked = deferred();
+  const t = setup({ stored: 's1', conductors: live, pick: () => picked.promise });
+  const done = t.conn.connect();
+  await settle();
+  t.tab.open = false;
+  t.conn.onClosed();
+  t.tab.open = true; // cc: Open adopts a new panel; its resolve calls resume()
+  await t.conn.resume();
+  const loadsBefore = t.log.view.filter((v) => v[0] === 'load').length;
+  picked.resolve({ label: 'x', sessionId: 's2' });
+  await done;
+  await settle(); await settle();
+  assert.equal(t.log.view.filter((v) => v[0] === 'load').length, loadsBefore + 1);
+  assert.equal(t.log.view.filter((v) => v[0] === 'load').at(-1)[1].documentUrl, 'http://127.0.0.1:8787/plugins/code-vscode/?focus=s1');
+  assert.equal(t.bar.text, 'cc: Refactor auth');
+  assert.equal(t.store.get(SESSION_KEY), 's1');
+});
